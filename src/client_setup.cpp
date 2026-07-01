@@ -8,7 +8,7 @@
 #include "digitalcurling/client/client_factory.hpp"
 #include "digitalcurling/client/protocol_models.hpp"
 #include "digitalcurling/plugins/plugin_factory_creator.hpp"
-#include "./example/rulebased.hpp"
+#include "./engine/cnn_engine.hpp"
 
 using StateUpdateEventData = digitalcurling::client::StateUpdateEventData;
 
@@ -18,7 +18,7 @@ std::unique_ptr<digitalcurling::client::IFactoryCreator> CreateFactoryCreator() 
     return std::make_unique<digitalcurling::plugins::PluginFactoryCreator>();
 }
 std::unique_ptr<digitalcurling::client::IThinkingEngine> CreateThinkingEngine() {
-    return std::make_unique<digitalcurling::client::RulebasedEngine>();
+    return std::make_unique<digitalcurling::client::CNNEngine>();
 }
 digitalcurling::client::ClientConnectSetting::Callback GetCallback() {
     return digitalcurling::client::ClientConnectSetting::Callback {

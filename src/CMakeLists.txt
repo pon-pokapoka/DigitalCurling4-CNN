@@ -5,6 +5,18 @@ function(target_compile_definition_if_exists target_name definition variable_nam
     endif()
 endfunction()
 
+# Torch (libtorch)
+set(LIBTORCH_DIR /usr/local/libtorch/)
+set(CAFFE2_USE_CUDNN 1)
+set(CAFFE2_USE_CUSPARSELT 1)
+list(APPEND CMAKE_PREFIX_PATH ${LIBTORCH_DIR})
+find_package(Torch REQUIRED)
+
+# OpenMP
+find_package(OpenMP)
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
+
 # --- Build client ---
 # sources
 add_executable(${PROJECT_NAME}
@@ -19,7 +31,7 @@ target_include_directories(${PROJECT_NAME}
     PRIVATE ${CMAKE_CURRENT_BINARY_DIR}
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
 )
-target_link_libraries(${PROJECT_NAME} PRIVATE CLI11::CLI11 httplib)
+target_link_libraries(${PROJECT_NAME} PRIVATE CLI11::CLI11 httplib ${TORCH_LIBRARIES})
 target_compile_features(${PROJECT_NAME} PRIVATE cxx_std_17)
 
 # definitions

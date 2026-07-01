@@ -32,7 +32,7 @@ option(DIGITALCURLING_CLIENT_BUILD_MIXED_CLIENT "Enable support for mixed client
 option(DIGITALCURLING_CLIENT_BUILD_MIXED_DOUBLES_CLIENT "Enable support for mixed doubles client" ON)
 
 # --- Build external libraries ---
-set(DIGITALCURLING_CLIENT_DCLIB_VERSION "4.0.0")
+set(DIGITALCURLING_CLIENT_DCLIB_VERSION "4.0.1")
 set(DIGITALCURLING_CLIENT_CLILIB_VERSION "2.6.1")
 set(DIGITALCURLING_CLIENT_HTTPLIB_VERSION "0.29.0")
 
@@ -40,7 +40,7 @@ set(DIGITALCURLING_CLIENT_HTTPLIB_VERSION "0.29.0")
 include(FetchContent)
 FetchContent_Declare(
     digitalcurling
-    GIT_REPOSITORY https://github.com/digitalcurling/DigitalCurling.git
+    GIT_REPOSITORY https://github.com/pon-pokapoka/DigitalCurling.git
     GIT_TAG        v${DIGITALCURLING_CLIENT_DCLIB_VERSION}
 )
 set(DIGITALCURLING_BUILD_CORE ON)

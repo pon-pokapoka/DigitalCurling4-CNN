@@ -1,6 +1,13 @@
-# DigitalCurling-Client-Cpp
+# CurlingCNN: CNN based curling AI
 
-デジタルカーリングの思考エンジン開発におけるテンプレート、および作成例となるサンプルコードを提供するリポジトリです。
+## Overview
+CurlingCNN is a CNN based curling AI that works on DigitalCurling4.
+- [Website](http://minerva.cs.uec.ac.jp/cgi-bin/curling/wiki.cgi?page=FrontPage)
+- [GitHub](https://github.com/digitalcurling/DigitalCurling)
+
+The CNN takes an image of sheet as input, and predicts the winning probability and the next shot.
+The CNN is trained with the game statistics from World Curling Championships and Olympics.
+This program is inspired by AlphaGo Zero and dlshogi.
 
 ## 必要要件
 
@@ -11,6 +18,11 @@
 - [OpenSSL](https://www.openssl.org/) (HTTPS通信を行う場合)
 
 #### 依存ライブラリ
+- LibTorch
+- CUDA
+- CuDNN
+These required libraries are automatically resolved by [Dockerfile]{./Dockerfile}.
+
 以下のライブラリは CMake によって自動的に解決されます。
 - [DigitalCurling](https://github.com/digitalcurling/DigitalCurling) 4.0 以上
 - [CLI11](https://github.com/CLIUtils/CLI11)
@@ -21,12 +33,6 @@
 > OpenSSLはシステムにインストールされている必要があります。
 
 ## ビルド
-
-1. このリポジトリをクローンします。
-   ```bash
-   git clone https://github.com/digitalcurling/DigitalCurling-Client-Cpp.git
-   cd DigitalCurling-Client-Cpp
-   ```
 
 1. ビルド用ディレクトリを作成し、ビルドを実行します。
    ```bash
@@ -64,7 +70,7 @@
 
 ## 思考エンジンの開発方法
 
-思考エンジンは、[src/example/](src/example/) ディレクトリ内のサンプルコードを参考に開発してください。
+思考エンジンは、[src/engine/](src/engine/) ディレクトリ内に配置。
 
 #### 開発手順
 
@@ -80,6 +86,23 @@
 
 1. ルートディレクトリの `client_config.cmake` でクライアント情報を設定します。
 
+## Model
+The network takes the sheet, score difference, and shot number as inputs.
+Policy network selects the next shot (speed, angle, and rotation).
+Value network predict the score of the end, which is converted to the winning rate with the number of ends to be played and the score difference.
+
+## Training
+Game statistics extracted from shot by shot available on [curlit](https://curlit.com/results) are used to train the model. Data extraction is described [here](https://www.jordanmyslik.com/portfolio/curling-analytics/).
+
+## Strategy
+CurlingCNN estimates shot candidates (speed, angle, and rotation) from the current state.
+Then, it adopts a shot where the model returns the highest winning probability after simulation of shot candidates.
+This strategy is inspired by AlphaGo Zero and dlshogi.
+
+## Author
+Takehiro Yoshioka
+- [@pon_pokapoka](https://x.com/pon_pokapoka)
+
 ## ライセンス
 
-[The Unlicense](./LICENSE)
+[MIT](./LICENSE)

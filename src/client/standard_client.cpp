@@ -15,10 +15,14 @@ std::unique_ptr<StandardClient> StandardClient::Create(
         players[i] = factory_creator->CreatePlayerFactory(match_info.players[i]);
     }
 
+    nlohmann::json j;
+    j["type"] = "fcv1light";
+    j["seconds_per_frame"] = 0.001;
+
     auto idxs = engine->OnInit(
         match_info.rule,
         match_info.setting,
-        factory_creator->CreateSimulatorFactory(match_info.simulator),
+        factory_creator->CreateSimulatorFactory(j),
         std::move(players)
     );
     if (idxs.size() != 4)
@@ -48,7 +52,8 @@ void StandardClient::OnNextEnd(StateUpdateEventData const& event_data) {
     engine_->OnNextEnd(event_data.game_state);
 }
 moves::Move StandardClient::OnMyTurn(StateUpdateEventData const& event_data) {
-    int index = event_data.game_state.shot / 2;
+    if (players_index_.empty()) throw std::runtime_error("StandardClient: players_index_ is empty");
+    std::size_t index = static_cast<std::size_t>(event_data.game_state.shot / 2) / players_index_.size();
     return engine_->OnMyTurn(
         players_[players_index_[index]], event_data.game_state, event_data.last_shot
     );

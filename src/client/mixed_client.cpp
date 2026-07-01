@@ -57,7 +57,8 @@ void MixedClient::OnNextEnd(StateUpdateEventData const& event_data) {
     engine_->OnNextEnd(event_data.game_state);
 }
 moves::Move MixedClient::OnMyTurn(StateUpdateEventData const& event_data) {
-    int index = event_data.game_state.shot / 2;
+    if (players_index_.empty()) throw std::runtime_error("MixedClient: players_index_ is empty");
+    std::size_t index = static_cast<std::size_t>(event_data.game_state.shot / 2) / players_index_.size();
     return engine_->OnMyTurn(
         players_[players_index_[index]], event_data.game_state, event_data.last_shot
     );

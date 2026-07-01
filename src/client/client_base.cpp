@@ -141,21 +141,23 @@ void ClientBase::Connect(ClientConnectSetting const& setting) {
         error = std::runtime_error("SSE connection error: " + httplib::to_string(err));
     });
     sse_client.on_event("latest_state_update", [&](const httplib::sse::SSEMessage &msg) {
+        // std::cout << "Received latest_state_update event: " << msg.data << std::endl << std::endl;
         push_event("latest_state_update event", [this, &setting, &sse_client, msg]() {
             StateUpdateEventData event_data = ParseStateUpdateEventData(msg);
-            OnReceiveLatestStateUpdateEvent(event_data);
             if (setting.callback.on_latest_state_update)
                 setting.callback.on_latest_state_update(event_data);
+            OnReceiveLatestStateUpdateEvent(event_data);
 
             if (event_data.game_state.IsGameOver()) sse_client.stop();
         });
     });
     sse_client.on_event("state_update", [&](const httplib::sse::SSEMessage &msg) {
+        // std::cout << "Received state_update event: " << msg.data << std::endl << std::endl;
         push_event("state_update event", [this, &setting, &sse_client, msg]() {
             StateUpdateEventData event_data = ParseStateUpdateEventData(msg);
-            OnReceiveStateUpdateEvent(event_data);
             if (setting.callback.on_state_update)
                 setting.callback.on_state_update(event_data);
+            OnReceiveStateUpdateEvent(event_data);
         });
     });
 
@@ -224,7 +226,10 @@ StateUpdateEventData ClientBase::ParseStateUpdateEventData(httplib::sse::SSEMess
 
     auto j_scores = json.at("score").get<TeamValue<std::vector<std::uint8_t>>>();
     std::vector<std::optional<std::uint8_t>> scores_team0(max_end_ + 1), scores_team1(max_end_ + 1);
-    for (int e = 0; e < state.end; e++) {
+    int end_completed = 0;
+    if (total_shot == 16) end_completed = 1;
+    std::cout << "\nEnd Completed: " << end_completed << "\n\n";
+    for (int e = 0; e < state.end + end_completed; e++) {
         scores_team0[e] = j_scores[Team::k0][e];
         scores_team1[e] = j_scores[Team::k1][e];
     }
@@ -241,7 +246,7 @@ StateUpdateEventData ClientBase::ParseStateUpdateEventData(httplib::sse::SSEMess
             state.hammer = json.at("mix_doubles_settings").at("end_setup_team").get<Team>();
         }
     } else {
-        state.shot = static_cast<std::uint8_t>(total_shot - 1);
+        state.shot = static_cast<std::uint8_t>(total_shot);
         state.hammer = current_hammer_;
     }
 
