@@ -10,7 +10,7 @@ value_(-1),
 visit_count_(0),
 sum_value_(0),
 child_nodes_(),
-child_node_addresses_({}),
+child_node_addresses_(policy_weight*policy_width*policy_rotation),
 child_visit_count_(torch::zeros({1, policy_weight*policy_width*policy_rotation}, torch::kInt)),
 child_sum_value_(torch::zeros({1, policy_weight*policy_width*policy_rotation}, torch::kFloat)),
 child_max_value_(torch::zeros({1, policy_weight*policy_width*policy_rotation}, torch::kFloat)),
@@ -21,7 +21,13 @@ void UctNode::CreateChild(std::pair<int, int> indices) {
     std::unique_ptr<UctNode> child(new UctNode());
     child->parent_ = this;
     child->indices_ = indices;
-    child_node_addresses_[indices.first][indices.second] = child.get();
+
+    auto& action_children = child_node_addresses_[indices.first];
+    if (indices.second >= static_cast<int>(action_children.size())) {
+        action_children.resize(indices.second + 1, nullptr);
+    }
+    action_children[indices.second] = child.get();
+
     child_nodes_.push_back(std::move(child));
 }
 
@@ -46,13 +52,32 @@ void UctNode::CreateChild(std::pair<int, int> indices) {
 
 UctNode* UctNode::GetChild(std::pair<int, int> indices)
 {
-    return child_node_addresses_[indices.first][indices.second];
+    if (indices.first < 0 || indices.first >= static_cast<int>(child_node_addresses_.size())) {
+        return nullptr;
+    }
+
+    auto const& action_children = child_node_addresses_[indices.first];
+    if (indices.second < 0 || indices.second >= static_cast<int>(action_children.size())) {
+        return nullptr;
+    }
+    return action_children[indices.second];
 }
 
 
 UctNode* UctNode::GetParent()
 {
     return parent_;
+}
+
+int UctNode::AllocateNextChildIndex(int action) {
+    std::lock_guard<std::mutex> lock(child_reserve_mutex_);
+    if (action < 0) return 0;
+    if (action >= static_cast<int>(child_node_addresses_.size())) {
+        child_node_addresses_.resize(action + 1);
+    }
+    int idx = static_cast<int>(child_node_addresses_[action].size());
+    child_node_addresses_[action].resize(idx + 1, nullptr);
+    return idx;
 }
 
 void UctNode::SetGameState(dc::GameState game_state)
@@ -120,7 +145,7 @@ float UctNode::GetValue()
     return value_;
 }
 
-std::array<std::array<UctNode*, nSimulation>, policy_weight*policy_width*policy_rotation> UctNode::GetChildNodeAddresses()
+std::vector<std::vector<UctNode*>> const& UctNode::GetChildNodeAddresses() const
 {
     return child_node_addresses_;
 }

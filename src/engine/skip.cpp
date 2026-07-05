@@ -5,6 +5,7 @@
 #include <tuple>
 #include <queue>
 #include <atomic>
+#include <algorithm>
 #include <thread>
 #include <random>
 #include <cstdlib>
@@ -12,6 +13,9 @@
 #include <mutex>
 #include <condition_variable>
 #include <numeric>
+#include <map>
+#include <fstream>
+#include <unordered_set>
 
 #include <torch/script.h>
 #include <torch/cuda.h>
@@ -383,20 +387,29 @@ float Skip::search(UctNode* current_node, int k)
         
         // if (omp_get_thread_num() == 0) std::cout << indices.index({0, 0}).item<int>() << "  " << std::endl;
 
-        auto next_node = current_node->GetChild(std::make_pair(
-                indices.index({0, 0}).item<int>(),
-                current_node->GetChildVisitCount().index({0, indices.index({0, 0}).item<int>()}).item<int>() % nSimulation
-            ));
 
-        // std::cout << indices.index({0, 0}).item<int>() << "  " << current_node->GetChildVisitCount().index({0, indices.index({0, 0}).item<int>()}).item<int>() % nSimulation << "  " << next_node << std::endl; 
+        int action = indices.index({0, 0}).item<int>();
+        int action_visit_count = current_node->GetChildVisitCount().index({0, action}).item<int>();
+        bool is_last_shot = (current_node->GetGameState().shot + 1) >= kShotPerEnd_ * 2;
+        int sim_slot = action_visit_count % nSimulation;
 
-        if (!(next_node) || (current_node->GetChildVisitCount().index({0, indices.index({0, 0}).item<int>()}).item<int>() < expand_threshold) || (current_node->GetGameState().shot == kShotPerEnd_ - 1)) {
+        if (is_last_shot) {
+            sim_slot = current_node->AllocateNextChildIndex(action);
+            // std::filesystem::create_directories("build");
+            // std::ofstream slot_log("build/last_shot_slots.csv", std::ios::app);
+            // if (slot_log) {
+            //     slot_log << static_cast<int>(current_node->GetGameState().shot) << "," << action << "," << sim_slot << "\n";
+            // }
+        }
+
+        auto next_node = current_node->GetChild(std::make_pair(action, sim_slot));
+
+        // std::cout << action << "  " << sim_slot << "  " << next_node << std::endl;
+
+        if (!(next_node) || (action_visit_count < expand_threshold) || is_last_shot) {
             auto start_sim = std::chrono::steady_clock::now();
             queue_create_child_[k] = current_node;
-            queue_create_child_index_[k] = std::make_pair(
-                indices.index({0, 0}).item<int>(),
-                current_node->GetChildVisitCount().index({0, indices.index({0, 0}).item<int>()}).item<int>() % nSimulation
-            );
+            queue_create_child_index_[k] = std::make_pair(action, sim_slot);
             flag_create_child_[k] = true;
             SimulateMove(current_node, queue_create_child_index_[k], k);
             auto end_sim = std::chrono::steady_clock::now();
@@ -1083,6 +1096,50 @@ dc::moves::Move Skip::command(dc::GameState const& game_state)
 
     // wait for 1 second
     // std::this_thread::sleep_for(std::chrono::seconds(1));
+
+    // // Traverse tree to collect per-action child counts per shot and save to CSV
+    // {
+    //     const int numActions = policy_weight * policy_width * policy_rotation;
+    //     std::map<int, std::vector<int>> max_children; // shot -> vector[action] = max children seen for that shot/action
+    //     std::queue<UctNode*> qn;
+    //     std::unordered_set<UctNode*> visited;
+    //     qn.push(root_node.get());
+    //     visited.insert(root_node.get());
+
+    //     while (!qn.empty()) {
+    //         UctNode* node = qn.front(); qn.pop();
+    //         int shot = static_cast<int>(node->GetGameState().shot);
+    //         auto const& addrs = node->GetChildNodeAddresses();
+
+    //         if (!max_children.count(shot)) max_children[shot] = std::vector<int>(numActions, 0);
+
+    //         for (int a = 0; a < numActions; ++a) {
+    //             int children = 0;
+    //             if (a < static_cast<int>(addrs.size())) {
+    //                 for (auto ptr : addrs[a]) {
+    //                     if (ptr) {
+    //                         ++children;
+    //                         if (visited.insert(ptr).second) qn.push(ptr);
+    //                     }
+    //                 }
+    //             }
+    //             max_children[shot][a] = std::max(max_children[shot][a], children);
+    //         }
+    //     }
+
+    //     // write CSV snapshot of the current tree
+    //     std::filesystem::create_directories("build");
+    //     std::ofstream ofs("build/child_counts.csv", std::ofstream::app);
+    //     if (ofs) {
+    //         ofs << "shot,action,max_children\n";
+    //         for (auto const& [shot, vec] : max_children) {
+    //             for (int a = 0; a < static_cast<int>(vec.size()); ++a) {
+    //                 ofs << shot << "," << a << "," << vec[a] << "\n";
+    //             }
+    //         }
+    //         ofs.close();
+    //     }
+    // }
 
     return dc::moves::Move(PixelToShot(pixel_id));
 }

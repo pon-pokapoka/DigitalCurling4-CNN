@@ -4,6 +4,7 @@
 #include <torch/script.h>
 #include <torch/cuda.h>
 #include <vector>
+#include <mutex>
 
 #include "config.hpp"
 #include "digitalcurling/digitalcurling.hpp"
@@ -45,7 +46,7 @@ class UctNode
         torch::Tensor GetPolicy();
         float GetValue();
 
-        std::array<std::array<UctNode*, nSimulation>, policy_weight*policy_width*policy_rotation> GetChildNodeAddresses();
+        std::vector<std::vector<UctNode*>> const& GetChildNodeAddresses() const;
 
         void SetValue(float);
         void SetCount(int);
@@ -63,6 +64,8 @@ class UctNode
 
         std::pair<int, int> GetIndices();
 
+        int AllocateNextChildIndex(int action);
+
     private:
         UctNode* parent_;
         dc::GameState       game_state_;
@@ -76,7 +79,9 @@ class UctNode
         float   sum_value_;
 
         std::vector<Ptr>    child_nodes_;
-        std::array<std::array<UctNode*, nSimulation>, policy_weight*policy_width*policy_rotation>    child_node_addresses_;
+        std::vector<std::vector<UctNode*>> child_node_addresses_;
+        std::mutex          child_reserve_mutex_;
+
 
         torch::Tensor       child_visit_count_;
         torch::Tensor       child_sum_value_;
