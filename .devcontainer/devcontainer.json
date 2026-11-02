@@ -24,8 +24,13 @@
     "mounts": [
         "source=dc4-cnn-ccache,target=/home/ubuntu/.cache/ccache,type=volume",
         // Claude Code login/settings persist across container rebuilds
-        "source=dc4-cnn-claude,target=/opt/claude-config,type=volume"
+        "source=dc4-cnn-claude,target=/opt/claude-config,type=volume",
+        // GitHub CLI login persists across container rebuilds
+        "source=dc4-cnn-gh,target=/opt/gh-config,type=volume"
     ],
+    "containerEnv": {
+        "GH_CONFIG_DIR": "/opt/gh-config"
+    },
     "postCreateCommand": "cmake --fresh -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release",
     "customizations": {
         "vscode": {
