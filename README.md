@@ -21,7 +21,7 @@ This program is inspired by AlphaGo Zero and dlshogi.
 - LibTorch
 - CUDA
 - CuDNN
-These required libraries are automatically resolved by [Dockerfile]{./Dockerfile}.
+These required libraries are provided by the container images (see [Docker / Dev Container](#docker--dev-container)).
 
 以下のライブラリは CMake によって自動的に解決されます。
 - [DigitalCurling](https://github.com/digitalcurling/DigitalCurling) 4.0 以上
@@ -41,6 +41,52 @@ These required libraries are automatically resolved by [Dockerfile]{./Dockerfile
    cmake -DCMAKE_BUILD_TYPE=Release ..
    cmake --build . --config Release
    ```
+
+## Docker / Dev Container
+
+GPU use requires the NVIDIA driver and the NVIDIA Container Toolkit on the host.
+
+#### Development (Dev Container, CLI)
+[`.devcontainer/`](.devcontainer/) defines the development image (CUDA devel + libtorch + gdb/clangd/ccache).
+Start it with the [devcontainer CLI](https://github.com/devcontainers/cli) (`npm install -g @devcontainers/cli`):
+
+```bash
+.devcontainer/dev.sh up       # build the image and start the container (first run also configures CMake)
+.devcontainer/dev.sh build    # cmake --build build inside the container
+.devcontainer/dev.sh shell    # interactive shell inside the container
+.devcontainer/dev.sh down     # stop and remove the container
+
+# without the wrapper
+devcontainer up --workspace-folder .
+devcontainer exec --workspace-folder . bash
+```
+
+#### Runtime image (Kubernetes)
+The root [`Dockerfile`](Dockerfile) is a multi-stage build. The final image is based on `nvidia/cuda:*-base`
+and contains only the binary, the libtorch shared libraries, and the model.
+It runs as a non-root user (UID 10001), and `ENTRYPOINT` is the client itself, so pass connection options via the Pod's `args:`.
+The model files (`src/engine/model/traced.pt`, `win_table.csv`) must be present in the build context.
+
+```bash
+docker build -t cnn-client:latest .
+docker run --rm --gpus all cnn-client:latest \
+    --host http://server:5000 --id <match-id> --team 0 --auth-id user --auth-password pass
+```
+
+```yaml
+# Example Pod spec
+containers:
+  - name: client
+    image: cnn-client:latest
+    args: ["--host", "http://server:5000", "--id", "$(MATCH_ID)", "--team", "0"]
+    securityContext:
+      runAsNonRoot: true
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+    resources:
+      limits:
+        nvidia.com/gpu: 1
+```
 
 ## 使用方法
 
