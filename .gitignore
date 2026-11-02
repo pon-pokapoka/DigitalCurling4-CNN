@@ -20,3 +20,7 @@ _deps
 
 # VSCode
 /.vscode/
+
+# self-play local config and state
+scripts/.self_play*.env
+.last_match_id

@@ -15,8 +15,11 @@
         "--shm-size=1g",
         "--name=dc4-cnn-dev"
     ],
-    "remoteUser": "ubuntu",
-    "updateRemoteUserUID": true,
+    // Rootless Docker: container root == host user, so bind-mounted files keep
+    // host ownership. With rootful Docker, switch to "ubuntu" and set
+    // updateRemoteUserUID to true so the CLI remaps it to the host UID.
+    "remoteUser": "root",
+    "updateRemoteUserUID": false,
     "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
     "mounts": [
         "source=dc4-cnn-ccache,target=/home/ubuntu/.cache/ccache,type=volume"

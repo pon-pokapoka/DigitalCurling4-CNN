@@ -67,7 +67,12 @@ RUN set -eux; \
             libtorch_python.so|*_test.so|libbackend_with_compiler.so|libnnapi_backend.so|libaoti_custom_ops.so) ;; \
             *) cp -a "$f" /out/usr/local/libtorch/lib/ ;; \
         esac; \
-    done
+    done; \
+    # libtorch (>=2.10) bundles only the cuDNN dispatcher (libcudnn.so.9), not the
+    # sub-libraries it dlopen()s (ops/cnn/engines...), nor NVRTC builtins used by the
+    # TorchScript CUDA fuser. Take a consistent set from the devel image.
+    cp -a /usr/lib/x86_64-linux-gnu/libcudnn*.so.9* /out/usr/local/libtorch/lib/; \
+    cp -a /usr/local/cuda/lib64/libnvrtc-builtins.so* /out/usr/local/libtorch/lib/
 
 # ---------------------------------------------------------------------------
 FROM nvidia/cuda:${CUDA_VERSION}-base-ubuntu${UBUNTU_VERSION} AS runtime
