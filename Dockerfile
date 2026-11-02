@@ -1,27 +1,100 @@
-FROM nvidia/cuda:12.6.2-cudnn-devel-ubuntu24.04
+# syntax=docker/dockerfile:1
+#
+# Runtime image for the CNN DigitalCurling client (Kubernetes-ready).
+#
+#   docker build -t cnn-client:latest .
+#   docker run --rm --gpus all cnn-client:latest --host http://server:5000 --id <match> --team 0 \
+#       --auth-id user --auth-password pass
+#
+# Stages:
+#   toolchain : CUDA devel + compilers + libtorch (cached; changes only when versions change)
+#   build     : compiles the client and stages a minimal /out tree
+#   runtime   : nvidia/cuda *base* image + libtorch shared libs + binary + model, non-root
+#
+# The development image lives in .devcontainer/Dockerfile.
 
-SHELL ["/bin/bash", "-c"]
+ARG CUDA_VERSION=13.4.3
+ARG UBUNTU_VERSION=26.04
 
-ARG BOOST_VERSION=1.83
-RUN apt update && apt install -y\
-    cmake\
-    gdb\
-    git\
-    libboost${BOOST_VERSION}-dev\
-    libboost-date-time${BOOST_VERSION}-dev\
-    libboost-regex${BOOST_VERSION}-dev\
-    libcli11-dev\
-#     libcusparselt0\
-#     libcusparselt-dev\
-    libicu-dev\
-    ninja-build\
-    unzip\
-    wget\
+# ---------------------------------------------------------------------------
+FROM nvidia/cuda:${CUDA_VERSION}-cudnn-devel-ubuntu${UBUNTU_VERSION} AS toolchain
+
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        ca-certificates \
+        cmake \
+        g++ \
+        git \
+        libboost-dev \
+        libboost-date-time-dev \
+        libboost-regex-dev \
+        libicu-dev \
+        libssl-dev \
+        ninja-build \
+        unzip \
+        wget \
     && rm -rf /var/lib/apt/lists/*
 
-ARG TORCH_VERSION=2.5.1
-ARG CUDA_VERSION=124
-RUN wget https://download.pytorch.org/libtorch/cu${CUDA_VERSION}/libtorch-cxx11-abi-shared-with-deps-${TORCH_VERSION}%2Bcu${CUDA_VERSION}.zip\
-    && unzip libtorch-cxx11-abi-shared-with-deps-${TORCH_VERSION}+cu${CUDA_VERSION}.zip -d /usr/local\
-    && rm libtorch-cxx11-abi-shared-with-deps-${TORCH_VERSION}+cu${CUDA_VERSION}.zip
+ARG TORCH_VERSION=2.15.0
+ARG TORCH_CUDA=134
+RUN wget -q -O /tmp/libtorch.zip \
+        "https://download.pytorch.org/libtorch/cu${TORCH_CUDA}/libtorch-shared-with-deps-${TORCH_VERSION}%2Bcu${TORCH_CUDA}.zip" \
+    && unzip -q /tmp/libtorch.zip -d /usr/local \
+    && rm /tmp/libtorch.zip
 
+# ---------------------------------------------------------------------------
+FROM toolchain AS build
+
+WORKDIR /src
+COPY CMakeLists.txt client_config.cmake ./
+COPY include/ include/
+COPY src/ src/
+
+RUN cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+    && cmake --build build --parallel
+
+# Stage the runtime tree.
+# The engine resolves its model as <exe>/../../../src/engine/model, so the
+# binary must live at <root>/build/bin/ and the model at <root>/src/engine/model/.
+# libtorch dlopen()s cuDNN/NVRTC lazily, so copy every shared lib except
+# test/python-only ones rather than relying on ldd.
+RUN set -eux; \
+    mkdir -p /out/app/build/bin /out/app/src/engine/model /out/usr/local/libtorch/lib; \
+    cp build/bin/CNNClient_v* /out/app/build/bin/cnn-client; \
+    cp src/engine/model/traced.pt src/engine/model/win_table.csv /out/app/src/engine/model/; \
+    cd /usr/local/libtorch/lib; \
+    for f in *.so*; do \
+        case "$f" in \
+            libtorch_python.so|*_test.so|libbackend_with_compiler.so|libnnapi_backend.so|libaoti_custom_ops.so) ;; \
+            *) cp -a "$f" /out/usr/local/libtorch/lib/ ;; \
+        esac; \
+    done
+
+# ---------------------------------------------------------------------------
+FROM nvidia/cuda:${CUDA_VERSION}-base-ubuntu${UBUNTU_VERSION} AS runtime
+
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        ca-certificates \
+        libgomp1 \
+        libssl3t64 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=build /out/ /
+
+# Fixed numeric UID so Kubernetes `runAsNonRoot: true` can verify it.
+ARG APP_UID=10001
+RUN useradd --system --uid ${APP_UID} --user-group --no-create-home --home-dir /app app
+USER ${APP_UID}:${APP_UID}
+WORKDIR /app
+
+ENV NVIDIA_VISIBLE_DEVICES=all \
+    NVIDIA_DRIVER_CAPABILITIES=compute,utility \
+    LD_LIBRARY_PATH=/usr/local/libtorch/lib
+
+LABEL org.opencontainers.image.title="CNNClient" \
+      org.opencontainers.image.source="https://github.com/pon-pokapoka/DigitalCurling4-CNN" \
+      org.opencontainers.image.licenses="MIT"
+
+# Exec form: the client is PID 1 and receives SIGTERM directly from the kubelet.
+# Pass connection options as container `args:` in the Pod spec.
+ENTRYPOINT ["/app/build/bin/cnn-client"]
+CMD ["--help"]

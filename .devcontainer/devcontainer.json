@@ -1,0 +1,39 @@
+{
+    "name": "DigitalCurling4-CNN",
+    "build": {
+        "dockerfile": "Dockerfile",
+        "context": ".",
+        "args": {
+            "CUDA_VERSION": "13.4.3",
+            "UBUNTU_VERSION": "26.04",
+            "TORCH_VERSION": "2.15.0",
+            "TORCH_CUDA": "134"
+        }
+    },
+    "runArgs": [
+        "--gpus=all",
+        "--shm-size=1g",
+        "--name=dc4-cnn-dev"
+    ],
+    "remoteUser": "ubuntu",
+    "updateRemoteUserUID": true,
+    "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
+    "mounts": [
+        "source=dc4-cnn-ccache,target=/home/ubuntu/.cache/ccache,type=volume"
+    ],
+    "postCreateCommand": "cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release",
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "llvm-vs-code-extensions.vscode-clangd",
+                "ms-vscode.cmake-tools",
+                "editorconfig.editorconfig"
+            ],
+            "settings": {
+                "cmake.buildDirectory": "${workspaceFolder}/build",
+                "cmake.generator": "Ninja",
+                "clangd.arguments": ["--compile-commands-dir=${workspaceFolder}/build"]
+            }
+        }
+    }
+}
