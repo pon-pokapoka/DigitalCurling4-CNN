@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Thin wrapper around the devcontainer CLI (npm i -g @devcontainers/cli).
 #
-#   scripts/dev.sh up        # build image (if needed) and start the container
-#   scripts/dev.sh shell     # interactive shell inside the container
-#   scripts/dev.sh build     # cmake --build build inside the container
-#   scripts/dev.sh exec CMD  # run an arbitrary command inside the container
-#   scripts/dev.sh rebuild   # rebuild image from scratch and recreate container
-#   scripts/dev.sh down      # stop and remove the container
+#   .devcontainer/dev.sh up        # build image (if needed) and start the container
+#   .devcontainer/dev.sh shell     # interactive shell inside the container
+#   .devcontainer/dev.sh build     # cmake --build build inside the container
+#   .devcontainer/dev.sh exec CMD  # run an arbitrary command inside the container
+#   .devcontainer/dev.sh rebuild   # rebuild image from scratch and recreate container
+#   .devcontainer/dev.sh down      # stop and remove the container
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

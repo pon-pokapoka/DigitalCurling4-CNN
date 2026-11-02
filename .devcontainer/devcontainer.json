@@ -22,9 +22,11 @@
     "updateRemoteUserUID": false,
     "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
     "mounts": [
-        "source=dc4-cnn-ccache,target=/home/ubuntu/.cache/ccache,type=volume"
+        "source=dc4-cnn-ccache,target=/home/ubuntu/.cache/ccache,type=volume",
+        // Claude Code login/settings persist across container rebuilds
+        "source=dc4-cnn-claude,target=/opt/claude-config,type=volume"
     ],
-    "postCreateCommand": "cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release",
+    "postCreateCommand": "cmake --fresh -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release",
     "customizations": {
         "vscode": {
             "extensions": [

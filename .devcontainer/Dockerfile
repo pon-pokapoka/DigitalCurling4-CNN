@@ -56,3 +56,14 @@ RUN echo "${USERNAME} ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/${USERNAME} \
 ENV CCACHE_DIR=/home/${USERNAME}/.cache/ccache \
     CMAKE_GENERATOR=Ninja \
     CMAKE_CXX_COMPILER_LAUNCHER=ccache
+
+# Claude Code (native installer). Copied to /usr/local/bin so any user can run it;
+# rebuild the image to update (auto-updater disabled).
+# Config/login lives in CLAUDE_CONFIG_DIR, backed by a named volume (see devcontainer.json).
+RUN curl -fsSL https://claude.ai/install.sh | bash \
+    && cp -L /root/.local/bin/claude /usr/local/bin/claude \
+    && rm -rf /root/.local/bin/claude /root/.local/share/claude \
+    && mkdir -p /opt/claude-config \
+    && chown ${USERNAME}:${USERNAME} /opt/claude-config
+ENV CLAUDE_CONFIG_DIR=/opt/claude-config \
+    DISABLE_AUTOUPDATER=1

@@ -51,10 +51,10 @@ GPU use requires the NVIDIA driver and the NVIDIA Container Toolkit on the host.
 Start it with the [devcontainer CLI](https://github.com/devcontainers/cli) (`npm install -g @devcontainers/cli`):
 
 ```bash
-scripts/dev.sh up       # build the image and start the container (first run also configures CMake)
-scripts/dev.sh build    # cmake --build build inside the container
-scripts/dev.sh shell    # interactive shell inside the container
-scripts/dev.sh down     # stop and remove the container
+.devcontainer/dev.sh up       # build the image and start the container (first run also configures CMake)
+.devcontainer/dev.sh build    # cmake --build build inside the container
+.devcontainer/dev.sh shell    # interactive shell inside the container
+.devcontainer/dev.sh down     # stop and remove the container
 
 # without the wrapper
 devcontainer up --workspace-folder .
