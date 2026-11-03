@@ -21,7 +21,18 @@ else
   exit 1
 fi
 
-dc() { "${DC[@]}" "$@" --workspace-folder "$REPO_ROOT"; }
+# Commits are signed through the host's ssh-agent, which devcontainer.json
+# bind-mounts from $SSH_AUTH_SOCK. Without it the mount source would be empty.
+require_agent() {
+  if [[ -z "${SSH_AUTH_SOCK:-}" || ! -S "$SSH_AUTH_SOCK" ]]; then
+    echo "No ssh-agent on the host (SSH_AUTH_SOCK=${SSH_AUTH_SOCK:-unset})." >&2
+    echo "Start one and load your signing key first:  eval \"\$(ssh-agent)\" && ssh-add" >&2
+    exit 1
+  fi
+  ssh-add -l >/dev/null 2>&1 || echo "Warning: the host ssh-agent has no keys loaded; run ssh-add, or commits will fail to sign." >&2
+}
+
+dc() { require_agent; "${DC[@]}" "$@" --workspace-folder "$REPO_ROOT"; }
 dc_exec() { "${DC[@]}" exec --workspace-folder "$REPO_ROOT" "$@"; }
 
 cmd="${1:-shell}"; shift || true
@@ -30,7 +41,7 @@ case "$cmd" in
   shell)   dc up >/dev/null && dc_exec bash -l ;;
   build)   dc up >/dev/null && dc_exec cmake --build build "$@" ;;
   exec)    dc up >/dev/null && dc_exec "$@" ;;
-  rebuild) "${DC[@]}" up --workspace-folder "$REPO_ROOT" --remove-existing-container --build-no-cache ;;
+  rebuild) require_agent; "${DC[@]}" up --workspace-folder "$REPO_ROOT" --remove-existing-container --build-no-cache ;;
   down)    docker rm -f "$CONTAINER_NAME" ;;
   *)       sed -n '2,10p' "$0"; exit 1 ;;
 esac
