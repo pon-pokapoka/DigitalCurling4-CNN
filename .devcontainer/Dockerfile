@@ -52,7 +52,10 @@ RUN echo "${USERNAME} ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/${USERNAME} \
     && chmod 0440 /etc/sudoers.d/${USERNAME} \
     # pre-create the ccache dir so the named volume inherits user ownership
     && mkdir -p /home/${USERNAME}/.cache/ccache \
-    && chown -R ${USERNAME}:${USERNAME} /home/${USERNAME}/.cache
+    && chown -R ${USERNAME}:${USERNAME} /home/${USERNAME}/.cache \
+    # personal git config (GIT_CONFIG_GLOBAL), backed by a named volume
+    && mkdir -p /opt/git-config \
+    && chown ${USERNAME}:${USERNAME} /opt/git-config
 
 ENV CCACHE_DIR=/home/${USERNAME}/.cache/ccache \
     CMAKE_GENERATOR=Ninja \

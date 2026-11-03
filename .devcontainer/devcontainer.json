@@ -26,10 +26,14 @@
         // Claude Code login/settings persist across container rebuilds
         "source=dc4-cnn-claude,target=/opt/claude-config,type=volume",
         // GitHub CLI login persists across container rebuilds
-        "source=dc4-cnn-gh,target=/opt/gh-config,type=volume"
+        "source=dc4-cnn-gh,target=/opt/gh-config,type=volume",
+        // Personal git config (identity, URL rewrites, ...) persists across
+        // rebuilds and stays out of the repo
+        "source=dc4-cnn-git,target=/opt/git-config,type=volume"
     ],
     "containerEnv": {
-        "GH_CONFIG_DIR": "/opt/gh-config"
+        "GH_CONFIG_DIR": "/opt/gh-config",
+        "GIT_CONFIG_GLOBAL": "/opt/git-config/gitconfig"
     },
     "postCreateCommand": "cmake --fresh -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release",
     "customizations": {
