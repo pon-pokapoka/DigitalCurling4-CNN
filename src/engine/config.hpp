@@ -1,3 +1,6 @@
+// Copyright (c) 2023-2026 Takehiro Yoshioka
+// SPDX-License-Identifier: MIT
+
 #ifndef CONFIG_HPP
 #define CONFIG_HPP
 

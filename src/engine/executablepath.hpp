@@ -1,3 +1,6 @@
+// Copyright (c) 2023-2026 Takehiro Yoshioka
+// SPDX-License-Identifier: MIT
+
 #ifndef EXECUTABLEPATH_HPP
 #define EXECUTABLEPATH_HPP
 

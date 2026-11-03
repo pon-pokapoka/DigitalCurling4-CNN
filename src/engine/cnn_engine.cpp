@@ -1,4 +1,5 @@
 // Copyright (c) 2022-2026 UEC Takeshi Ito Laboratory
+// Copyright (c) 2023-2026 Takehiro Yoshioka
 // SPDX-License-Identifier: MIT
 
 #include <iostream>
