@@ -23,7 +23,7 @@
 #include <torch/script.h>
 #include <torch/cuda.h>
 #include <torch/csrc/api/include/torch/nn/functional/activation.h>
-#include <c10/cuda/CUDACachingAllocator.h>
+#include <ATen/DeviceAccelerator.h>
 #include <ATen/Parallel.h>
 
 #include "readcsv.hpp"
@@ -209,7 +209,7 @@ simulator_pool_size_(1)
         auto outputs = module_.forward(inputs).toTuple();
         torch::Tensor out1 = outputs->elements()[0].toTensor().reshape({1, policy_weight * policy_width * policy_rotation}).to(torch::kCPU);
     }
-    c10::cuda::CUDACachingAllocator::emptyCache();
+    if (device_.is_cuda()) at::accelerator::emptyCache();
     std::cout << std::endl;
 }
 
@@ -917,7 +917,7 @@ dc::moves::Move Skip::command(dc::GameState const& game_state)
         now = std::chrono::system_clock::now();
     }
     // GPUのキャッシュをクリア
-    c10::cuda::CUDACachingAllocator::emptyCache();
+    if (device_.is_cuda()) at::accelerator::emptyCache();
 
     auto msec = std::chrono::duration_cast<std::chrono::milliseconds>(now - start).count();
     std::cout << count << "  " << root_node->GetVisitCount() << " simulations in " << msec << " msec" << std::endl;
