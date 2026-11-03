@@ -29,13 +29,20 @@
         "source=dc4-cnn-gh,target=/opt/gh-config,type=volume",
         // Personal git config (identity, URL rewrites, ...) persists across
         // rebuilds and stays out of the repo
-        "source=dc4-cnn-git,target=/opt/git-config,type=volume"
+        "source=dc4-cnn-git,target=/opt/git-config,type=volume",
+        // Host ssh-agent, used for SSH commit signing (and git over SSH).
+        // The private key never enters the container. dev.sh checks that the
+        // host agent is running before starting the container.
+        "source=${localEnv:SSH_AUTH_SOCK},target=/run/host-ssh-agent.sock,type=bind"
     ],
     "containerEnv": {
         "GH_CONFIG_DIR": "/opt/gh-config",
-        "GIT_CONFIG_GLOBAL": "/opt/git-config/gitconfig"
+        "GIT_CONFIG_GLOBAL": "/opt/git-config/gitconfig",
+        "SSH_AUTH_SOCK": "/run/host-ssh-agent.sock"
     },
     "postCreateCommand": "cmake --fresh -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release",
+    // Warn (non-fatally) if commit signing isn't set up or the agent is unreachable.
+    "postStartCommand": ".devcontainer/setup-signing.sh --check",
     "customizations": {
         "vscode": {
             "extensions": [
