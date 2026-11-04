@@ -166,4 +166,23 @@ TEST(LeastVisitedLegalAction, BreaksTiesRandomly) {
     EXPECT_GT(picks.size(), 100u);  // not always the first index
 }
 
+// --- FinalVisitThreshold -----------------------------------------------------
+
+TEST(FinalVisitThreshold, MostVisitedMoveAlwaysQualifies) {
+    for (int max_visits : {1, 3, config::min_visit - 1, config::min_visit, 1000, 5000}) {
+        EXPECT_LE(sp::FinalVisitThreshold(max_visits), max_visits) << max_visits;
+    }
+}
+
+TEST(FinalVisitThreshold, RequiresMinVisitAndRatioOfTheBest) {
+    int const big = 100 * config::min_visit;
+    int const t = sp::FinalVisitThreshold(big);
+    EXPECT_GE(t, config::min_visit);
+    EXPECT_GE(t, static_cast<int>(std::ceil(config::min_visit_ratio * big)));
+}
+
+TEST(FinalVisitThreshold, NeverZero) {
+    EXPECT_EQ(sp::FinalVisitThreshold(0), 1);  // unvisited moves (sum / 0) never qualify
+}
+
 }  // namespace

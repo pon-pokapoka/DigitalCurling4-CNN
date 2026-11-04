@@ -20,7 +20,10 @@ namespace config {
 
     const int expand_threshold = nSimulation; // max value of number of simulation for each child node
 
-    const int min_visit = 4; // minimum number of visit for each child node to select move
+    // A root move must have at least min_visit visits and at least
+    // min_visit_ratio of the most-visited move's visits to be chosen.
+    const int min_visit = 100;
+    const float min_visit_ratio = 0.1;
 
     // Tie-Breaker Epsilon
     const double tie_breaker_epsilon = 1e-3;

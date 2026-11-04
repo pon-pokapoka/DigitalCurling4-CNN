@@ -1073,8 +1073,9 @@ dc::moves::Move Skip::command(dc::GameState const& game_state)
 
     // 1. Calculate the mean Q-value (Winning Rate Estimate) for visited nodes.
     // Unvisited nodes will have a value of 0, but will be filtered later by the max_q check.
+    int const visit_threshold = search_policy::FinalVisitThreshold(root_node->GetChildVisitCount().max().item<int>());
     torch::Tensor mean_q_values = torch::where(
-        root_node->GetChildVisitCount() >= min_visit, 
+        root_node->GetChildVisitCount() >= visit_threshold, 
         root_node->GetChildSumValue() / root_node->GetChildVisitCount() + 
         root_node->GetChildMinValue(),
         0 // Assign a very low value (or negative infinity) to unvisited/unreliable nodes

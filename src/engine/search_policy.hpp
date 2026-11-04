@@ -98,6 +98,17 @@ inline int LeastVisitedLegalAction(torch::Tensor const& child_visits,
     return best;
 }
 
+// Minimum visits a root move needs to be chosen as the final move: at least
+// config::min_visit and config::min_visit_ratio of the most-visited move, but
+// never more than the most-visited move has, so that move always qualifies.
+// Returns at least 1 so unvisited moves (value sum / 0) never qualify.
+inline int FinalVisitThreshold(int max_child_visits)
+{
+    int const relative = static_cast<int>(std::ceil(config::min_visit_ratio * max_child_visits));
+    int const threshold = std::max(config::min_visit, relative);
+    return std::max(1, std::min(threshold, max_child_visits));
+}
+
 } // namespace digitalcurling::client::search_policy
 
 #endif // SEARCH_POLICY_HPP
