@@ -13,7 +13,10 @@ namespace config {
     const int virtual_loss = 1;
     const float c_puct = 10;
 
-    const float random_policy = 0.15; // rate of randomly selecting move instead of selecting by policy
+    // Root only: probability of trying the least-visited legal shot instead of
+    // the PUCT choice, so shots the CNN rates low still get evaluated. With about
+    // 10000 root visits per shot this covers every legal shot (~630) once.
+    const float root_explore_rate = 0.1;
 
     const int expand_threshold = nSimulation; // max value of number of simulation for each child node
 

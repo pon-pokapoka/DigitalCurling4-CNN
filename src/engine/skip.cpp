@@ -27,6 +27,7 @@
 #include <ATen/Parallel.h>
 
 #include "readcsv.hpp"
+#include "search_policy.hpp"
 #include "executablepath.hpp"
 #include <sstream>
 
@@ -131,7 +132,8 @@ queue_create_child_(),
 queue_create_child_index_(),
 flag_create_child_(),
 temp_game_states_(),
-simulator_pool_size_(1)
+simulator_pool_size_(1),
+legal_mask_(search_policy::LegalMask())
 {
     int const client_threads = ResolveClientThreads();
     omp_set_dynamic(0);
@@ -326,29 +328,32 @@ float Skip::search(UctNode* current_node, int k)
     // filt = current_node.getFilter();
 
     if (!((current_node->GetGameState().shot == 0) && (current_node->GetParent()))) {        
-        torch::Tensor policy;
-        std::random_device rd;  // Will be used to obtain a seed for the random number engine
-        std::mt19937 gen(rd()); // Standard mersenne_twister_engine seeded with rd()
+        thread_local std::mt19937 gen(std::random_device{}());
         std::uniform_real_distribution<> dis(0.0, 1.0);
 
-        policy = current_node->GetPolicy();
+        torch::Tensor policy = current_node->GetPolicy();
 
         // std::cout << ;
         // std::cout << static_cast<int>(currencurrent_node->GetVisitCount()t_node->GetGameState().end) << "  " << static_cast<int>(current_node->GetGameState().shot) << std::endl;
 
-        torch::Tensor ucb_value;
         auto start_ucb = std::chrono::steady_clock::now();
-        
-        torch::Tensor q = torch::where(current_node->GetChildVisitCount() > 0,
-            current_node->GetChildSumValue() / current_node->GetChildVisitCount(), 0);
-        torch::Tensor u = policy * std::sqrt(torch::sum(current_node->GetChildVisitCount()).item<int>() + 1) / (1 + current_node->GetChildVisitCount());
 
-        // std::cout << torch::sum(current_node->GetChildVisitCount()).item<int>() << std::endl;
+        bool const my_turn = current_node->GetGameState().GetNextTeam() == team_;
+        bool const is_root = current_node->GetParent() == nullptr;
 
-        if (current_node->GetGameState().GetNextTeam() == team_) ucb_value = q + c_puct * u;
-        else ucb_value = 1 - q + c_puct * u;
+        // Root only: sometimes try the least-visited legal shot instead of the
+        // PUCT choice, so shots the CNN rates low still get evaluated. Deeper
+        // nodes use plain PUCT so random play doesn't leak into ancestor values.
+        int explore_action = -1;
+        if (is_root && dis(gen) < root_explore_rate) {
+            explore_action = search_policy::LeastVisitedLegalAction(current_node->GetChildVisitCount(), legal_mask_, gen);
+        }
 
-        if (dis(gen) < random_policy) ucb_value = torch::rand({1, policy_weight*policy_width*policy_rotation}); // * filt.reshape({1, policy_weight*policy_width*policy_rotation});
+        torch::Tensor ucb_value;
+        if (explore_action < 0) {
+            ucb_value = search_policy::PuctScore(current_node->GetChildVisitCount(), current_node->GetChildSumValue(),
+                                                 policy, legal_mask_, my_turn, c_puct);
+        }
         auto end_ucb = std::chrono::steady_clock::now();
         g_search_profile.ucb_ns.fetch_add(
             std::chrono::duration_cast<std::chrono::nanoseconds>(end_ucb - start_ucb).count(),
@@ -359,7 +364,8 @@ float Skip::search(UctNode* current_node, int k)
         // if (omp_get_thread_num() == 0) std::cout << torch::sum(q).item<float>() << torch::sum(policy).item<float>() << torch::sum(current_node->GetChildVisitCount()).item<int>();
 
         auto start_topk = std::chrono::steady_clock::now();
-        auto indices = std::get<1>(torch::topk(ucb_value, 1));
+        int action = explore_action;
+        if (action < 0) action = std::get<1>(torch::topk(ucb_value, 1)).index({0, 0}).item<int>();
         auto end_topk = std::chrono::steady_clock::now();
         g_search_profile.topk_ns.fetch_add(
             std::chrono::duration_cast<std::chrono::nanoseconds>(end_topk - start_topk).count(),
@@ -391,7 +397,6 @@ float Skip::search(UctNode* current_node, int k)
         // if (omp_get_thread_num() == 0) std::cout << indices.index({0, 0}).item<int>() << "  " << std::endl;
 
 
-        int action = indices.index({0, 0}).item<int>();
         int action_visit_count = current_node->GetChildVisitCount().index({0, action}).item<int>();
         bool is_last_shot = (current_node->GetGameState().shot + 1) >= kShotPerEnd_ * 2;
         int sim_slot = action_visit_count % nSimulation;
@@ -494,7 +499,8 @@ void Skip::updateCount(UctNode* node, std::pair<int, int> indices, int count)
 {
     node->SetCount(count);
 
-    node->SetChildCountValue(indices.first, count, 0, true);
+    bool const my_turn = node->GetGameState().GetNextTeam() == team_;
+    node->SetChildCountValue(indices.first, count, search_policy::VirtualLossValue(my_turn, count), true);
 
     if (node->GetParent()) {
         updateCount(node->GetParent(), node->GetIndices(), count);
@@ -1085,7 +1091,7 @@ dc::moves::Move Skip::command(dc::GameState const& game_state)
     //    - For actions not on the plateau, assign a very low value (or negative infinity).
     torch::Tensor policy = root_node->GetPolicy(); // Assuming this is a tensor of P(a|s)
     torch::Tensor tie_breaker_score = torch::where(
-        plateau_mask,
+        plateau_mask & legal_mask_,
         policy,
         0
     );
