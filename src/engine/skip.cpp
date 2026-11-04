@@ -783,6 +783,9 @@ dc::moves::Move Skip::command(dc::GameState const& game_state)
                     std::mutex update_mutex;
                     std::condition_variable update_cv;
                     std::atomic<int> next_i(0);
+                    // Children simulated this iteration. Only nBatchSize of them can be
+                    // evaluated, so stop handing out descents once that many exist.
+                    std::atomic<int> children_created(0);
                     std::atomic<int> workers_remaining(nthreads - 1);
 
                     // Each search() call runs torch tensor ops (UCB, torch::where, etc.).
@@ -812,18 +815,19 @@ dc::moves::Move Skip::command(dc::GameState const& game_state)
                         } else {
                             // worker threads: grab indices and run search
                             while (true) {
+                                if (children_created.load(std::memory_order_relaxed) >= nBatchSize) break;
                                 int i = next_i.fetch_add(1);
                                 if (i >= nLoop) break;
                                 search(root_node.get(), i);
 
                                 if (flag_create_child_[i]) {
+                                    children_created.fetch_add(1, std::memory_order_relaxed);
                                     std::unique_lock<std::mutex> lock(update_mutex);
                                     update_queue.emplace(queue_create_child_[i], queue_create_child_index_[i], virtual_loss);
                                     lock.unlock();
                                     update_cv.notify_one();
                                 }
 
-                                if (std::accumulate(std::begin(flag_create_child_), std::end(flag_create_child_), 0) >= nBatchSize) continue;
                             }
 
                             // worker finished its share; decrement remaining and notify updater if last
@@ -848,14 +852,15 @@ dc::moves::Move Skip::command(dc::GameState const& game_state)
         a = std::chrono::system_clock::now();
         for (auto i = 0; i < nLoop; ++i) {
             if (flag_create_child_[i]) {
-                // std::cout << queue_create_child_index_[i].first << "  " << queue_create_child_index_[i].second << std::endl;
-                queue_create_child_[i]->CreateChild(queue_create_child_index_[i]);
-                queue_create_child_[i]->GetChild(queue_create_child_index_[i])->SetGameState(temp_game_states_[i]);
-
                 // Undo virtual loss applied after the parallel search phase.
                 updateCount(queue_create_child_[i], queue_create_child_index_[i], -1*virtual_loss);
 
+                // Link a child into the tree only if it is evaluated in this
+                // iteration. An unevaluated child would occupy its slot for good:
+                // later descents reaching it neither recurse nor back up a value.
                 if (queue_evaluate_.size() < nBatchSize) {
+                    queue_create_child_[i]->CreateChild(queue_create_child_index_[i]);
+                    queue_create_child_[i]->GetChild(queue_create_child_index_[i])->SetGameState(temp_game_states_[i]);
                     queue_evaluate_.push_back(queue_create_child_[i]->GetChild(queue_create_child_index_[i]));
                     // std::cout << i << ":  ";
                     // std::cout << queue_create_child_index[i].first << "  " << queue_create_child_index[i].second << ";  ";
