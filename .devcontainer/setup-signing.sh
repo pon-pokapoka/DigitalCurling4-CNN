@@ -5,8 +5,11 @@
 # into the container (see devcontainer.json), and git signs through it. Settings
 # are written to GIT_CONFIG_GLOBAL (the dc4-cnn-git volume), never to the repo.
 #
-#   .devcontainer/setup-signing.sh            # use the only key in the agent
-#   .devcontainer/setup-signing.sh <pattern>  # pick the agent key whose line matches <pattern>
+#   .devcontainer/setup-signing.sh            # sign with the first key the agent lists (ssh-add -L)
+#   .devcontainer/setup-signing.sh <pattern>  # pin the agent key whose line matches <pattern>
+#
+# By default no key is written to the config: git runs gpg.ssh.defaultKeyCommand
+# ("ssh-add -L") at each signature and uses the first key the agent offers.
 #   .devcontainer/setup-signing.sh --check    # verify signing works (run on container start)
 set -euo pipefail
 
@@ -18,18 +21,25 @@ agent_keys() {
   ssh-add -L 2>/dev/null | grep -E '^(ssh-|ecdsa-|sk-)' || return 1
 }
 
+# The key git will sign with: the pinned user.signingkey, else the first agent key.
+signing_key() {
+  local key
+  key="$(git config --global --get user.signingkey || true)"
+  if [[ -n "$key" ]]; then echo "${key#key::}"; return; fi
+  agent_keys | head -n 1 | awk '{print $1" "$2}'
+}
+
 check() {
   local key
   if [[ "$(git config --global --get commit.gpgsign || true)" != "true" ]]; then
     warn "commit signing is not configured. Run: .devcontainer/setup-signing.sh"
     return 0
   fi
-  key="$(git config --global --get user.signingkey || true)"
-  key="${key#key::}"
   if ! agent_keys >/dev/null; then
     warn "no ssh-agent keys reachable (SSH_AUTH_SOCK=${SSH_AUTH_SOCK:-unset}); commits will fail until the host agent is forwarded. Recreate the container with .devcontainer/dev.sh after 'ssh-add' on the host."
     return 0
   fi
+  key="$(signing_key)"
   if ! agent_keys | awk '{print $1" "$2}' | grep -qxF "$key"; then
     warn "the configured signing key is not loaded in the forwarded ssh-agent; run 'ssh-add' for it on the host."
     return 0
@@ -42,13 +52,17 @@ if [[ "${1:-}" == "--check" ]]; then check; exit 0; fi
 [[ -n "${GIT_CONFIG_GLOBAL:-}" ]] || die "GIT_CONFIG_GLOBAL is not set; run this inside the dev container."
 keys="$(agent_keys)" || die "no keys in a forwarded ssh-agent (SSH_AUTH_SOCK=${SSH_AUTH_SOCK:-unset}). On the host: ssh-add <key>, then recreate the container: .devcontainer/dev.sh down && .devcontainer/dev.sh up"
 
+pin=""
 if [[ -n "${1:-}" ]]; then
   keys="$(grep -F -- "$1" <<<"$keys" || true)"
   [[ -n "$keys" ]] || die "no agent key matches '$1'. Available:"$'\n'"$(ssh-add -l)"
+  [[ "$(wc -l <<<"$keys")" -eq 1 ]] || die "several agent keys match '$1'; be more specific:"$'\n'"$keys"
+  pin=1
+elif [[ "$(wc -l <<<"$keys")" -gt 1 ]]; then
+  warn "several keys in the agent; git will sign with the first one 'ssh-add -L' lists. Pass a pattern to pin one."
 fi
-[[ "$(wc -l <<<"$keys")" -eq 1 ]] || die "several keys in the agent; pass a pattern (part of the comment) to pick one:"$'\n'"$keys"
 
-key="$(awk '{print $1" "$2}' <<<"$keys")"
+key="$(head -n 1 <<<"$keys" | awk '{print $1" "$2}')"
 email="$(git config --get user.email || true)"
 [[ -n "$email" ]] || die "user.email is not set; set it first: git config --global user.email you@example.com"
 
@@ -58,7 +72,13 @@ touch "$allowed"
 grep -qF -- "$key" "$allowed" || printf '%s namespaces="git" %s\n' "$email" "$key" >> "$allowed"
 
 git config --global gpg.format ssh
-git config --global user.signingkey "key::$key"
+if [[ -n "$pin" ]]; then
+  git config --global user.signingkey "key::$key"
+  git config --global --unset-all gpg.ssh.defaultKeyCommand || true
+else
+  git config --global --unset-all user.signingkey || true
+  git config --global gpg.ssh.defaultKeyCommand "ssh-add -L"
+fi
 git config --global gpg.ssh.allowedSignersFile "$allowed"
 git config --global commit.gpgsign true
 git config --global tag.gpgsign true
