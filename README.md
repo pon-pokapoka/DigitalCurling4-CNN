@@ -68,9 +68,12 @@ turn them on in `.devcontainer/local.env` (not committed; copy
 | Option | Effect | Apply with |
 |---|---|---|
 | `DC4_SSH_AGENT=1` | Forward the host ssh-agent (git over SSH, commit signing) | `dev.sh down && dev.sh up` |
-| `DC4_CLAUDE_CODE=1` | Install Claude Code in the image | `dev.sh rebuild` |
+| `DC4_CLAUDE_CODE=1` | Install Claude Code in the image; keep its login in volume `dc4-cnn-claude` | `dev.sh rebuild` |
+| `DC4_GITHUB=1` | Keep the GitHub CLI login in volume `dc4-cnn-gh` | `dev.sh down && dev.sh up` |
+| `DC4_GIT_CONFIG=1` | Keep your git config (identity, signing) in volume `dc4-cnn-git` | `dev.sh down && dev.sh up` |
 
-To sign commits with your GitHub-registered SSH signing key, set `DC4_SSH_AGENT=1` and run
+Only the ccache volume is always created. To sign commits with your GitHub-registered SSH
+signing key, set `DC4_SSH_AGENT=1` and `DC4_GIT_CONFIG=1` and run
 `.devcontainer/setup-signing.sh` once inside the container.
 
 #### Runtime image (Kubernetes)

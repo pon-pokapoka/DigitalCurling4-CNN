@@ -54,7 +54,8 @@ RUN echo "${USERNAME} ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/${USERNAME} \
     # pre-create the ccache dir so the named volume inherits user ownership
     && mkdir -p /home/${USERNAME}/.cache/ccache \
     && chown -R ${USERNAME}:${USERNAME} /home/${USERNAME}/.cache \
-    # personal git config (GIT_CONFIG_GLOBAL), backed by a named volume
+    # personal git config (GIT_CONFIG_GLOBAL), backed by a named volume when
+    # DC4_GIT_CONFIG=1 (see dev.sh)
     && mkdir -p /opt/git-config \
     && chown ${USERNAME}:${USERNAME} /opt/git-config
 
@@ -65,7 +66,7 @@ ENV CCACHE_DIR=/home/${USERNAME}/.cache/ccache \
 # Claude Code (native installer), only with INSTALL_CLAUDE_CODE=1 (off by default;
 # see .devcontainer/local.env.example). Copied to /usr/local/bin so any user can
 # run it; rebuild the image to update (auto-updater disabled).
-# Config/login lives in CLAUDE_CONFIG_DIR, backed by a named volume (see devcontainer.json).
+# Config/login lives in CLAUDE_CONFIG_DIR, backed by a named volume (see dev.sh).
 # Fail the build if the download fails, not only if bash does (hadolint DL4006).
 ARG INSTALL_CLAUDE_CODE=0
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
