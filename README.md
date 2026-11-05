@@ -61,6 +61,18 @@ devcontainer up --workspace-folder .
 devcontainer exec --workspace-folder . bash
 ```
 
+The container needs no SSH key, GitHub account or Claude. Personal extras are off by default;
+turn them on in `.devcontainer/local.env` (not committed; copy
+[`local.env.example`](.devcontainer/local.env.example)), which `dev.sh` reads:
+
+| Option | Effect | Apply with |
+|---|---|---|
+| `DC4_SSH_AGENT=1` | Forward the host ssh-agent (git over SSH, commit signing) | `dev.sh down && dev.sh up` |
+| `DC4_CLAUDE_CODE=1` | Install Claude Code in the image | `dev.sh rebuild` |
+
+To sign commits with your GitHub-registered SSH signing key, set `DC4_SSH_AGENT=1` and run
+`.devcontainer/setup-signing.sh` once inside the container.
+
 #### Runtime image (Kubernetes)
 The root [`Dockerfile`](Dockerfile) is a multi-stage build. The final image is based on `nvidia/cuda:*-base`
 and contains only the binary, the libtorch shared libraries, and the model.
