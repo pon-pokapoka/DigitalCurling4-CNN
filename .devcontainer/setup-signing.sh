@@ -7,7 +7,10 @@
 #
 #   .devcontainer/setup-signing.sh            # sign with the agent key registered on GitHub
 #   .devcontainer/setup-signing.sh <pattern>  # pin the agent key whose line matches <pattern>
-#   .devcontainer/setup-signing.sh --check    # refresh the key list and verify (run on container start)
+#   .devcontainer/setup-signing.sh --check    # refresh the key list and verify (run on container start;
+#                                             # silent unless signing is set up)
+#
+# Needs the host ssh-agent in the container: DC4_SSH_AGENT=1 in .devcontainer/local.env.
 #
 # By default no key is written to the config. The account's GitHub signing keys
 # (public API, no login needed) are cached in the volume, and git runs
@@ -75,12 +78,10 @@ fingerprint() { ssh-keygen -lf <(echo "$1") | awk '{print $2}'; }
 
 check() {
   local key
-  if [[ "$(git config --global --get commit.gpgsign || true)" != "true" ]]; then
-    warn "commit signing is not configured. Run: .devcontainer/setup-signing.sh"
-    return 0
-  fi
+  # Signing is opt-in: stay silent for anyone who has not set it up.
+  [[ "$(git config --global --get commit.gpgsign || true)" == "true" ]] || return 0
   if ! agent_keys >/dev/null; then
-    warn "no ssh-agent keys reachable (SSH_AUTH_SOCK=${SSH_AUTH_SOCK:-unset}); commits will fail until the host agent is forwarded. Recreate the container with .devcontainer/dev.sh after 'ssh-add' on the host."
+    warn "no ssh-agent keys reachable (SSH_AUTH_SOCK=${SSH_AUTH_SOCK:-unset}); commits will fail until the host agent is forwarded. Set DC4_SSH_AGENT=1 in .devcontainer/local.env, 'ssh-add' on the host, then .devcontainer/dev.sh down && .devcontainer/dev.sh up."
     return 0
   fi
   if [[ -z "$(git config --global --get user.signingkey || true)" ]]; then
@@ -101,7 +102,7 @@ check() {
 
 if [[ "${1:-}" == "--check" ]]; then check; exit 0; fi
 
-keys="$(agent_keys)" || die "no keys in a forwarded ssh-agent (SSH_AUTH_SOCK=${SSH_AUTH_SOCK:-unset}). On the host: ssh-add <key>, then recreate the container: .devcontainer/dev.sh down && .devcontainer/dev.sh up"
+keys="$(agent_keys)" || die "no keys in a forwarded ssh-agent (SSH_AUTH_SOCK=${SSH_AUTH_SOCK:-unset}). Set DC4_SSH_AGENT=1 in .devcontainer/local.env, ssh-add <key> on the host, then recreate the container: .devcontainer/dev.sh down && .devcontainer/dev.sh up"
 email="$(git config --get user.email || true)"
 [[ -n "$email" ]] || die "user.email is not set; set it first: git config --global user.email you@example.com"
 mkdir -p "$confdir"

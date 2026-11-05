@@ -24,3 +24,6 @@ _deps
 # self-play local config and state
 scripts/.self_play*.env
 .last_match_id
+
+# personal dev container options (see .devcontainer/local.env.example)
+.devcontainer/local.env

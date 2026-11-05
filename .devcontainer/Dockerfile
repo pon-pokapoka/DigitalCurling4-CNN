@@ -62,14 +62,18 @@ ENV CCACHE_DIR=/home/${USERNAME}/.cache/ccache \
     CMAKE_GENERATOR=Ninja \
     CMAKE_CXX_COMPILER_LAUNCHER=ccache
 
-# Claude Code (native installer). Copied to /usr/local/bin so any user can run it;
-# rebuild the image to update (auto-updater disabled).
+# Claude Code (native installer), only with INSTALL_CLAUDE_CODE=1 (off by default;
+# see .devcontainer/local.env.example). Copied to /usr/local/bin so any user can
+# run it; rebuild the image to update (auto-updater disabled).
 # Config/login lives in CLAUDE_CONFIG_DIR, backed by a named volume (see devcontainer.json).
 # Fail the build if the download fails, not only if bash does (hadolint DL4006).
+ARG INSTALL_CLAUDE_CODE=0
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
-RUN curl -fsSL https://claude.ai/install.sh | bash \
-    && cp -L /root/.local/bin/claude /usr/local/bin/claude \
-    && rm -rf /root/.local/bin/claude /root/.local/share/claude \
+RUN if [ "${INSTALL_CLAUDE_CODE}" = "1" ]; then \
+        curl -fsSL https://claude.ai/install.sh | bash \
+        && cp -L /root/.local/bin/claude /usr/local/bin/claude \
+        && rm -rf /root/.local/bin/claude /root/.local/share/claude; \
+    fi \
     && mkdir -p /opt/claude-config \
     && chown ${USERNAME}:${USERNAME} /opt/claude-config
 ENV CLAUDE_CONFIG_DIR=/opt/claude-config \
