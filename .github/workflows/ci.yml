@@ -1,0 +1,135 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main, development]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Keep in sync with ARG TORCH_VERSION in Dockerfile / .devcontainer/Dockerfile.
+  # CI has no GPU, so it builds against the CPU libtorch of the same version.
+  TORCH_VERSION: "2.15.0"
+
+jobs:
+  build-test:
+    name: Build and unit tests (Release, CPU libtorch)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      LIBTORCH_DIR: ${{ github.workspace }}/../libtorch-cpu/libtorch
+      CCACHE_DIR: ${{ github.workspace }}/../ccache
+      CCACHE_MAXSIZE: 500M
+      CCACHE_COMPRESS: "true"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            ninja-build ccache libssl-dev
+          cmake --version
+          g++ --version
+
+      - name: Cache libtorch
+        id: cache-libtorch
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.LIBTORCH_DIR }}
+          key: libtorch-cpu-${{ runner.os }}-${{ env.TORCH_VERSION }}
+
+      - name: Download libtorch (CPU)
+        if: steps.cache-libtorch.outputs.cache-hit != 'true'
+        run: |
+          dest="$(dirname "$LIBTORCH_DIR")"
+          mkdir -p "$dest"
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/libtorch.zip" \
+            "https://download.pytorch.org/libtorch/cpu/libtorch-shared-with-deps-${TORCH_VERSION}%2Bcpu.zip"
+          unzip -q "$RUNNER_TEMP/libtorch.zip" -d "$dest"
+          rm "$RUNNER_TEMP/libtorch.zip"
+          test -f "$LIBTORCH_DIR/share/cmake/Torch/TorchConfig.cmake"
+
+      - name: Cache ccache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-${{ runner.os }}-torch${{ env.TORCH_VERSION }}-${{ github.sha }}
+          restore-keys: |
+            ccache-${{ runner.os }}-torch${{ env.TORCH_VERSION }}-
+
+      - name: Configure
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DLIBTORCH_DIR="$LIBTORCH_DIR" \
+            -DDIGITALCURLING_CLIENT_BUILD_TESTS=ON
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: ccache stats
+        if: always()
+        run: ccache --show-stats || true
+
+      - name: Unit tests
+        run: ctest --test-dir build --output-on-failure --no-tests=error --parallel 4
+
+  lint:
+    name: Lint (shellcheck, hadolint)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      SHELLCHECK_VERSION: v0.11.0
+      SHELLCHECK_SHA256: 8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198
+      HADOLINT_VERSION: v2.15.1
+      HADOLINT_SHA256: c7187db94eeeeca956519a6af171adc31453941a1e777961f6e680f697c8c507
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install shellcheck ${{ env.SHELLCHECK_VERSION }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/bin"
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/shellcheck.tar.xz" \
+            "https://github.com/koalaman/shellcheck/releases/download/${SHELLCHECK_VERSION}/shellcheck-${SHELLCHECK_VERSION}.linux.x86_64.tar.xz"
+          echo "${SHELLCHECK_SHA256}  $RUNNER_TEMP/shellcheck.tar.xz" | sha256sum -c -
+          tar -xJf "$RUNNER_TEMP/shellcheck.tar.xz" -C "$RUNNER_TEMP" --strip-components=1 \
+            "shellcheck-${SHELLCHECK_VERSION}/shellcheck"
+          mv "$RUNNER_TEMP/shellcheck" "$RUNNER_TEMP/bin/shellcheck"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
+      - name: shellcheck
+        run: |
+          shopt -s nullglob
+          files=(scripts/*.sh .devcontainer/*.sh)
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "No shell scripts found; skipping."
+            exit 0
+          fi
+          shellcheck --version
+          shellcheck "${files[@]}"
+
+      - name: hadolint (non-blocking)
+        continue-on-error: true
+        run: |
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/bin/hadolint" \
+            "https://github.com/hadolint/hadolint/releases/download/${HADOLINT_VERSION}/hadolint-linux-x86_64"
+          echo "${HADOLINT_SHA256}  $RUNNER_TEMP/bin/hadolint" | sha256sum -c -
+          chmod +x "$RUNNER_TEMP/bin/hadolint"
+          # DL3008: apt version pinning is intentionally not done for these images.
+          "$RUNNER_TEMP/bin/hadolint" --ignore DL3008 Dockerfile .devcontainer/Dockerfile

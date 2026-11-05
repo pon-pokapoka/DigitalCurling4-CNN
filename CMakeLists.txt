@@ -30,6 +30,11 @@ add_compile_options($<$<CXX_COMPILER_ID:MSVC>:/utf-8>)
 option(DIGITALCURLING_CLIENT_BUILD_STANDARD_CLIENT "Enable support for standard client" ON)
 option(DIGITALCURLING_CLIENT_BUILD_MIXED_CLIENT "Enable support for mixed client" ON)
 option(DIGITALCURLING_CLIENT_BUILD_MIXED_DOUBLES_CLIENT "Enable support for mixed doubles client" ON)
+option(DIGITALCURLING_CLIENT_BUILD_TESTS "Build unit tests (GoogleTest)" OFF)
+
+if (DIGITALCURLING_CLIENT_BUILD_TESTS)
+    enable_testing()
+endif()
 
 # --- Build external libraries ---
 set(DIGITALCURLING_CLIENT_DCLIB_VERSION "4.0.1")
