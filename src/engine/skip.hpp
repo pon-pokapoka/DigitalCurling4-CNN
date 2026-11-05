@@ -73,7 +73,7 @@ class Skip
         std::array<dc::GameState, nLoop> temp_game_states_;
         int simulator_pool_size_;
 
-        torch::Tensor filt_;
+        torch::Tensor legal_mask_; // legal shots, {1, policy size} bool
 
         int kShotPerEnd_;
 

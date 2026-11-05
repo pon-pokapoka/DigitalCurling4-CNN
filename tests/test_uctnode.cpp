@@ -208,8 +208,8 @@ TEST(UctNode, GameStateRoundTrip) {
     EXPECT_FLOAT_EQ(got.stones.team1[2]->position.y, dc::coordinate::kTeeLineY);
 }
 
-// Known bug: SetFilter wraps its by-value argument with torch::from_blob without clone(), so the stored filter dangles, see review
-TEST(UctNode, DISABLED_FilterOutlivesArgument) {
+// SetFilter must copy its by-value argument, not keep a pointer into it.
+TEST(UctNode, FilterOutlivesArgument) {
     dc::GameSetting setting;
     dc::GameState state(setting);
     auto const expected = digitalcurling::client::createFilter(state, setting);
