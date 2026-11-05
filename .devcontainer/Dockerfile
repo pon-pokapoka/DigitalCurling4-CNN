@@ -65,6 +65,8 @@ ENV CCACHE_DIR=/home/${USERNAME}/.cache/ccache \
 # Claude Code (native installer). Copied to /usr/local/bin so any user can run it;
 # rebuild the image to update (auto-updater disabled).
 # Config/login lives in CLAUDE_CONFIG_DIR, backed by a named volume (see devcontainer.json).
+# Fail the build if the download fails, not only if bash does (hadolint DL4006).
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 RUN curl -fsSL https://claude.ai/install.sh | bash \
     && cp -L /root/.local/bin/claude /usr/local/bin/claude \
     && rm -rf /root/.local/bin/claude /root/.local/share/claude \
