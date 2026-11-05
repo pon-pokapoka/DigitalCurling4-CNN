@@ -61,11 +61,10 @@ RUN set -eux; \
     mkdir -p /out/app/build/bin /out/app/src/engine/model /out/usr/local/libtorch/lib; \
     cp build/bin/CNNClient_v* /out/app/build/bin/cnn-client; \
     cp src/engine/model/traced.pt src/engine/model/win_table.csv /out/app/src/engine/model/; \
-    cd /usr/local/libtorch/lib; \
-    for f in *.so*; do \
-        case "$f" in \
+    for p in /usr/local/libtorch/lib/*.so*; do \
+        case "${p##*/}" in \
             libtorch_python.so|*_test.so|libbackend_with_compiler.so|libnnapi_backend.so|libaoti_custom_ops.so) ;; \
-            *) cp -a "$f" /out/usr/local/libtorch/lib/ ;; \
+            *) cp -a "$p" /out/usr/local/libtorch/lib/ ;; \
         esac; \
     done; \
     # libtorch (>=2.10) bundles only the cuDNN dispatcher (libcudnn.so.9), not the

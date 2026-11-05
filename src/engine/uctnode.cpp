@@ -103,7 +103,8 @@ void UctNode::SetPolicy(torch::Tensor policy)
 
 void UctNode::SetFilter(std::array<std::array<std::array<bool, policy_width>, policy_weight>, policy_rotation> filter)
 {
-    filter_ = torch::from_blob(filter.data(), {policy_rotation, policy_weight, policy_width}, torch::kInt8);
+    // from_blob only wraps the argument's storage, which dies on return: clone it.
+    filter_ = torch::from_blob(filter.data(), {policy_rotation, policy_weight, policy_width}, torch::kBool).clone();
 }
 
 // void UctNode::SetValue(float value)
