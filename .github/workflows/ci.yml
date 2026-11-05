@@ -124,8 +124,7 @@ jobs:
           shellcheck --version
           shellcheck "${files[@]}"
 
-      - name: hadolint (non-blocking)
-        continue-on-error: true
+      - name: hadolint
         run: |
           curl -fsSL --retry 3 -o "$RUNNER_TEMP/bin/hadolint" \
             "https://github.com/hadolint/hadolint/releases/download/${HADOLINT_VERSION}/hadolint-linux-x86_64"
