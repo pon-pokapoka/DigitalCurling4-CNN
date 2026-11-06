@@ -65,15 +65,13 @@ void CNNEngine::OnGameStart(
     // initialize curling-cnn Skip if available
     // skip_ = std::make_unique<Skip>();
     std::array<size_t, 4> player_order{0,1,2,3};
-    try {
-        std::vector<std::unique_ptr<dc::players::IPlayerFactory>> dc_players;
-        for (auto const& p : players_) {
-            dc_players.push_back(p ? p->Clone() : nullptr);
-        }
-        skip_->OnInit(team_, game_rule_, game_setting_, simulator_factory_->Clone(), std::move(dc_players), kShotPerEnd);
-    } catch (...) {
-        // ignore initialization failures and continue with fallback behavior
+    // A failure here propagates: without an initialised engine every turn would
+    // be a fallback shot, so stopping with the error is better than playing on.
+    std::vector<std::unique_ptr<dc::players::IPlayerFactory>> dc_players;
+    for (auto const& p : players_) {
+        dc_players.push_back(p ? p->Clone() : nullptr);
     }
+    skip_->OnInit(team_, game_rule_, game_setting_, simulator_factory_->Clone(), std::move(dc_players), kShotPerEnd);
 }
 
 void CNNEngine::OnNextEnd(GameState const& game_state) {
@@ -101,8 +99,10 @@ moves::Move CNNEngine::OnMyTurn(
                 // concede or other move: forward as concede
                 return moves::Move(moves::Concede());
             }
+        } catch (std::exception const& e) {
+            std::cerr << "[Error] search failed, playing the fallback shot: " << e.what() << std::endl;
         } catch (...) {
-            // fallthrough to fallback below
+            std::cerr << "[Error] search failed, playing the fallback shot: unknown exception" << std::endl;
         }
     }
 
