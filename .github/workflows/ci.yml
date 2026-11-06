@@ -18,6 +18,8 @@ env:
   # Keep in sync with ARG TORCH_VERSION in Dockerfile / .devcontainer/Dockerfile.
   # CI has no GPU, so it builds against the CPU libtorch of the same version.
   TORCH_VERSION: "2.15.0"
+  # SHA256 of the CPU archive: change it together with TORCH_VERSION.
+  LIBTORCH_SHA256: f26d7550019005bac238fec4ae316b220b006cfcca29b40d7313c50f26875f60
 
 jobs:
   build-test:
@@ -48,7 +50,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ env.LIBTORCH_DIR }}
-          key: libtorch-cpu-${{ runner.os }}-${{ env.TORCH_VERSION }}
+          key: libtorch-cpu-${{ runner.os }}-${{ env.TORCH_VERSION }}-${{ env.LIBTORCH_SHA256 }}
 
       - name: Download libtorch (CPU)
         if: steps.cache-libtorch.outputs.cache-hit != 'true'
@@ -57,6 +59,7 @@ jobs:
           mkdir -p "$dest"
           curl -fsSL --retry 3 -o "$RUNNER_TEMP/libtorch.zip" \
             "https://download.pytorch.org/libtorch/cpu/libtorch-shared-with-deps-${TORCH_VERSION}%2Bcpu.zip"
+          echo "${LIBTORCH_SHA256}  $RUNNER_TEMP/libtorch.zip" | sha256sum -c -
           unzip -q "$RUNNER_TEMP/libtorch.zip" -d "$dest"
           rm "$RUNNER_TEMP/libtorch.zip"
           test -f "$LIBTORCH_DIR/share/cmake/Torch/TorchConfig.cmake"

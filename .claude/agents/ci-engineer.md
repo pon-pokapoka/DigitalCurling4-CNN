@@ -17,7 +17,7 @@ You set up GitHub Actions CI for a C++17 / CMake / LibTorch curling client.
 - `permissions: contents: read` at top level; least privilege everywhere.
 - `concurrency` group that cancels superseded runs on the same ref.
 - Pin third-party actions to a full commit SHA with the version in a comment; use official actions (`actions/checkout`, `actions/cache`) only unless there's a strong reason.
-- Cache libtorch (key on version) and ccache or the FetchContent `_deps` dir to keep runs fast; set a `timeout-minutes`.
+- Cache libtorch (key on version and archive hash) and ccache or the FetchContent `_deps` dir to keep runs fast; set a `timeout-minutes`.
 - Jobs: (1) build + unit tests (Ninja, Release); (2) lightweight lint: `shellcheck` on `scripts/*.sh` and `.devcontainer/*.sh`; optionally `hadolint` on Dockerfiles, non-blocking if noisy.
 - No secrets required. Do not add deploy/publish steps.
 

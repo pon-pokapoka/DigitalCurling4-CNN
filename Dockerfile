@@ -4,7 +4,7 @@
 #
 #   docker build -t cnn-client:latest .
 #   docker run --rm --gpus all cnn-client:latest --host http://server:5000 --id <match> --team 0 \
-#       --auth-id user --auth-password pass
+#       --auth-id user --auth-pw pass
 #
 # Stages:
 #   toolchain : CUDA devel + compilers + libtorch (cached; changes only when versions change)
@@ -22,6 +22,7 @@ FROM nvidia/cuda:${CUDA_VERSION}-cudnn-devel-ubuntu${UBUNTU_VERSION} AS toolchai
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         ca-certificates \
         cmake \
+        curl \
         g++ \
         git \
         libboost-dev \
@@ -31,15 +32,19 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
         libssl-dev \
         ninja-build \
         unzip \
-        wget \
     && rm -rf /var/lib/apt/lists/*
 
 ARG TORCH_VERSION=2.15.0
 ARG TORCH_CUDA=134
-RUN wget -q -O /tmp/libtorch.zip \
+# SHA256 of the archive below: change it together with the two versions above,
+# including when overriding them with --build-arg.
+ARG LIBTORCH_SHA256=786f18f4af224e1caa2f649c8c0db6c3cc3dda98f47e6d8cd863a3c3b86859f5
+RUN curl -fsSL --retry 3 -o /tmp/libtorch.zip \
         "https://download.pytorch.org/libtorch/cu${TORCH_CUDA}/libtorch-shared-with-deps-${TORCH_VERSION}%2Bcu${TORCH_CUDA}.zip" \
+    && echo "${LIBTORCH_SHA256}  /tmp/libtorch.zip" > /tmp/libtorch.sha256 \
+    && sha256sum -c /tmp/libtorch.sha256 \
     && unzip -q /tmp/libtorch.zip -d /usr/local \
-    && rm /tmp/libtorch.zip
+    && rm /tmp/libtorch.zip /tmp/libtorch.sha256
 
 # ---------------------------------------------------------------------------
 FROM toolchain AS build

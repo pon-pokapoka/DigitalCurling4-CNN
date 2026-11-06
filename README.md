@@ -85,7 +85,7 @@ The model files (`src/engine/model/traced.pt`, `win_table.csv`) must be present 
 ```bash
 docker build -t cnn-client:latest .
 docker run --rm --gpus all cnn-client:latest \
-    --host http://server:5000 --id <match-id> --team 0 --auth-id user --auth-password pass
+    --host http://server:5000 --id <match-id> --team 0 --auth-id user --auth-pw pass
 ```
 
 ```yaml
@@ -123,7 +123,7 @@ containers:
 | `--id` | 接続先のゲームIDを指定します。 | none |
 | `--team` | 接続するチームを指定します。(0または1) | 0 |
 | `--auth-id` | Basic認証のIDを指定します。 | `user` |
-| `--auth-password` | Basic認証のパスワードを指定します。 | `password` |
+| `--auth-pw` | Basic認証のパスワードを指定します。 | `password` |
 | `--plugin-dir` | プラグインのディレクトリを指定します。 | `./plugins` |
 
 オプションは全て任意オプションですが、`--host` および `--id` はクライアントの起動に必要です。  
