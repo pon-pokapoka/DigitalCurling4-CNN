@@ -167,7 +167,7 @@ legal_mask_(search_policy::LegalMask())
     // The win table and the model are required: a failure to load either stops the client.
     auto const modelDir = dcRootPath / "src" / "engine" / "model";
     win_table_ = readcsv(modelDir / "win_table.csv");
-    // Rows are score differences -9..9; columns are the ends left, 0..10.
+    // Rows are score differences -9..9; columns are the ends completed, 0..10.
     requireTableShape(win_table_, 19, 11, (modelDir / "win_table.csv").string());
 
 
