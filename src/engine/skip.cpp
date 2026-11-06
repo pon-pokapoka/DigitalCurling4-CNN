@@ -15,6 +15,8 @@
 #include <chrono>
 #include <mutex>
 #include <condition_variable>
+#include <exception>
+#include <stdexcept>
 #include <numeric>
 #include <map>
 #include <fstream>
@@ -151,8 +153,7 @@ legal_mask_(search_policy::LegalMask())
 
     std::string execPath = getExecutablePath();
     if (execPath.empty()) {
-        std::cerr << "Failed to retrieve executable path." << std::endl;
-        dcRootPath = "../../";
+        throw std::runtime_error("cannot determine the executable path, needed to find the model files");
     }
 
     std::cout << "Executable Path: " << execPath << std::endl;
@@ -163,7 +164,11 @@ legal_mask_(search_policy::LegalMask())
 
     dcRootPath = execFilePath.parent_path().parent_path().parent_path();
 
-    win_table_ = readcsv(dcRootPath / "src" / "engine" / "model" / "win_table.csv");
+    // The win table and the model are required: a failure to load either stops the client.
+    auto const modelDir = dcRootPath / "src" / "engine" / "model";
+    win_table_ = readcsv(modelDir / "win_table.csv");
+    // Rows are score differences -9..9; columns are the ends completed, 0..10.
+    requireTableShape(win_table_, 19, 11, (modelDir / "win_table.csv").string());
 
 
     torch::NoGradGuard no_grad; 
@@ -181,12 +186,12 @@ legal_mask_(search_policy::LegalMask())
     try {
         // Deserialize the ScriptModule from a file using torch::jit::load().
         std::cout << "model loading..." << std::endl;
-        module_ = torch::jit::load(dcRootPath / "src" / "engine" / "model" / "traced.pt", device_);
+        module_ = torch::jit::load(modelDir / "traced.pt", device_);
         module_.to(dtype_);
         std::cout << "model loaded" << std::endl;
     }
     catch (const c10::Error& e) {
-        std::cerr << "error loading the model\n";
+        throw std::runtime_error("cannot load the model " + (modelDir / "traced.pt").string() + ": " + e.what_without_backtrace());
     }
 
     // ここでCNNによる推論を行うことで、次回以降の速度が早くなる
@@ -708,6 +713,10 @@ dc::moves::Move Skip::command(dc::GameState const& game_state)
     // TODO AIを作る際はここを編集してください
     auto start = std::chrono::system_clock::now();
 
+    // A search that failed on the previous shot may have left these set.
+    queue_evaluate_.clear();
+    flag_create_child_.fill(false);
+
     dc::GameState current_game_state = game_state;
 
     torch::NoGradGuard no_grad; 
@@ -793,6 +802,15 @@ dc::moves::Move Skip::command(dc::GameState const& game_state)
                     // evaluated, so stop handing out descents once that many exist.
                     std::atomic<int> children_created(0);
                     std::atomic<int> workers_remaining(nthreads - 1);
+                    // An exception must not leave the parallel region (that would
+                    // terminate the process): keep the first one and rethrow it after.
+                    std::exception_ptr search_error;
+                    std::atomic<bool> search_failed(false);
+                    auto const record_search_error = [&]() {
+                        std::lock_guard<std::mutex> lock(update_mutex);
+                        if (!search_error) search_error = std::current_exception();
+                        search_failed.store(true);
+                    };
 
                     // Each search() call runs torch tensor ops (UCB, torch::where, etc.).
                     // If ATen uses multiple threads inside each OpenMP worker we get N^2
@@ -806,45 +824,60 @@ dc::moves::Move Skip::command(dc::GameState const& game_state)
 
                         if (tid == updater_tid) {
                             // updater thread: consume requests and call updateCount
-                            while (true) {
-                                std::unique_lock<std::mutex> lock(update_mutex);
-                                update_cv.wait(lock, [&]{ return !update_queue.empty() || workers_remaining.load() == 0; });
-                                while (!update_queue.empty()) {
-                                    auto req = update_queue.front();
-                                    update_queue.pop();
-                                    lock.unlock();
-                                    updateCount(std::get<0>(req), std::get<1>(req), std::get<2>(req));
-                                    lock.lock();
+                            try {
+                                while (true) {
+                                    std::unique_lock<std::mutex> lock(update_mutex);
+                                    update_cv.wait(lock, [&]{ return !update_queue.empty() || workers_remaining.load() == 0; });
+                                    while (!update_queue.empty()) {
+                                        auto req = update_queue.front();
+                                        update_queue.pop();
+                                        lock.unlock();
+                                        updateCount(std::get<0>(req), std::get<1>(req), std::get<2>(req));
+                                        lock.lock();
+                                    }
+                                    if (workers_remaining.load() == 0 && update_queue.empty()) break;
                                 }
-                                if (workers_remaining.load() == 0 && update_queue.empty()) break;
+                            } catch (...) {
+                                record_search_error();
                             }
                         } else {
                             // worker threads: grab indices and run search
-                            while (true) {
-                                if (children_created.load(std::memory_order_relaxed) >= nBatchSize) break;
-                                int i = next_i.fetch_add(1);
-                                if (i >= nLoop) break;
-                                search(root_node.get(), i);
+                            try {
+                                while (true) {
+                                    if (search_failed.load()) break;
+                                    if (children_created.load(std::memory_order_relaxed) >= nBatchSize) break;
+                                    int i = next_i.fetch_add(1);
+                                    if (i >= nLoop) break;
+                                    search(root_node.get(), i);
 
-                                if (flag_create_child_[i]) {
-                                    children_created.fetch_add(1, std::memory_order_relaxed);
-                                    std::unique_lock<std::mutex> lock(update_mutex);
-                                    update_queue.emplace(queue_create_child_[i], queue_create_child_index_[i], virtual_loss);
-                                    lock.unlock();
-                                    update_cv.notify_one();
+                                    if (flag_create_child_[i]) {
+                                        children_created.fetch_add(1, std::memory_order_relaxed);
+                                        std::unique_lock<std::mutex> lock(update_mutex);
+                                        update_queue.emplace(queue_create_child_[i], queue_create_child_index_[i], virtual_loss);
+                                        lock.unlock();
+                                        update_cv.notify_one();
+                                    }
+
                                 }
-
+                            } catch (...) {
+                                record_search_error();
                             }
 
-                            // worker finished its share; decrement remaining and notify updater if last
-                            if (workers_remaining.fetch_sub(1) == 1) {
-                                update_cv.notify_one();
+                            // worker finished its share; decrement remaining and notify updater if last.
+                            // Taking the mutex keeps the notify from falling between the updater's
+                            // predicate check and its wait, which would leave it asleep for good.
+                            {
+                                std::lock_guard<std::mutex> lock(update_mutex);
+                                workers_remaining.fetch_sub(1);
                             }
+                            update_cv.notify_one();
                         }
                     } // end parallel region
 
                     // Restore ATen thread count for evaluation (GPU batched inference).
                     at::set_num_threads(nthreads);
+
+                    if (search_error) std::rethrow_exception(search_error);
                 }
         }
         b = std::chrono::system_clock::now();

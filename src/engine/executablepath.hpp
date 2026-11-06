@@ -7,40 +7,40 @@
 #include <iostream>
 #include <string>
 #include <filesystem>
+#include <system_error>
 
 // Platform-specific includes
 #ifdef _WIN32
     #include <windows.h>
-#elif __linux__
-    #include <unistd.h>
-    #include <limits.h>
 #elif __APPLE__
     #include <mach-o/dyld.h>
     #include <limits.h>
 #endif
 
-// Function to get executable path
+// Function to get executable path. Returns an empty string on failure.
 std::string getExecutablePath() {
-    char path[1024];
-
 #ifdef _WIN32
     // Windows implementation
-    GetModuleFileName(NULL, path, sizeof(path));
+    char path[1024];
+    DWORD const length = GetModuleFileName(NULL, path, sizeof(path));
+    if (length == 0 || length >= sizeof(path)) return "";
+    return std::string(path, length);
 #elif __linux__
     // Linux implementation using /proc/self/exe
-    ssize_t count = readlink("/proc/self/exe", path, sizeof(path));
-    if (count != -1) {
-        path[count] = '\0';  // Null-terminate the string
-    }
+    std::error_code ec;
+    auto const path = std::filesystem::read_symlink("/proc/self/exe", ec);
+    return ec ? std::string() : path.string();
 #elif __APPLE__
     // macOS implementation using _NSGetExecutablePath
+    char path[1024];
     uint32_t size = sizeof(path);
     if (_NSGetExecutablePath(path, &size) != 0) {
         return "";  // Buffer is too small
     }
-#endif
-
     return std::string(path);
+#else
+    return "";
+#endif
 }
 
 #endif // EXECUTABLEPATH_HPP

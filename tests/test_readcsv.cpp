@@ -92,8 +92,7 @@ TEST_F(ReadCsvTest, NonNumericTokenThrows) {
     EXPECT_ANY_THROW(readcsv(path));
 }
 
-// Known bug: blank lines (e.g. a trailing "\n\n") produce empty rows, see review
-TEST_F(ReadCsvTest, DISABLED_BlankLinesAreSkipped) {
+TEST_F(ReadCsvTest, BlankLinesAreSkipped) {
     auto path = WriteFile("a.csv", "1,2\n\n3,4\n\n");
     auto data = readcsv(path);
 
@@ -102,11 +101,30 @@ TEST_F(ReadCsvTest, DISABLED_BlankLinesAreSkipped) {
     EXPECT_EQ(data[1], (std::vector<double>{3, 4}));
 }
 
-// Known bug: a missing file silently returns an empty table instead of failing, see review
-TEST_F(ReadCsvTest, DISABLED_MissingFileIsAnError) {
+TEST_F(ReadCsvTest, MissingFileIsAnError) {
     fs::path path = dir_ / "does_not_exist.csv";
     ASSERT_FALSE(fs::exists(path));
-    EXPECT_ANY_THROW(readcsv(path.string()));
+    EXPECT_THROW(readcsv(path.string()), std::runtime_error);
+}
+
+TEST(RequireTableShapeTest, AcceptsLargeEnoughTable) {
+    std::vector<std::vector<double>> const table{{1, 2, 3}, {4, 5, 6}};
+    EXPECT_NO_THROW(requireTableShape(table, 2, 3, "t"));
+    EXPECT_NO_THROW(requireTableShape(table, 1, 2, "t"));
+}
+
+TEST(RequireTableShapeTest, RejectsMissingRows) {
+    std::vector<std::vector<double>> const table{{1, 2}};
+    EXPECT_THROW(requireTableShape(table, 2, 2, "t"), std::runtime_error);
+}
+
+TEST(RequireTableShapeTest, RejectsShortRow) {
+    std::vector<std::vector<double>> const table{{1, 2}, {3}};
+    EXPECT_THROW(requireTableShape(table, 2, 2, "t"), std::runtime_error);
+}
+
+TEST(RequireTableShapeTest, RejectsEmptyTable) {
+    EXPECT_THROW(requireTableShape({}, 1, 1, "t"), std::runtime_error);
 }
 
 }  // namespace
