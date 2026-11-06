@@ -21,6 +21,12 @@ project("${DIGITALCURLING_CLIENT_NAME}_v${DIGITALCURLING_CLIENT_VERSION}"
 )
 
 # --- Build settings ---
+# Search strength depends on speed, so a plain configure must not build unoptimised.
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    message(STATUS "No build type given; using Release")
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+endif()
+
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
