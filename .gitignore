@@ -21,6 +21,11 @@ _deps
 # VSCode
 /.vscode/
 
+# model weights and data: kept out of the repo
+model/
+*.pt
+*.csv
+
 # self-play local config and state
 scripts/.self_play*.env
 .last_match_id
