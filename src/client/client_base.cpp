@@ -8,13 +8,16 @@
     #error "DIGITALCURLING_CLIENT_VERSION_MAJOR is not defined"
 #endif
 
+#include <algorithm>
 #include <iostream>
 #include <memory>
 #include <thread>
 #include <mutex>
 #include <queue>
+#include <stdexcept>
 #include <nlohmann/json.hpp>
 #include "digitalcurling/client/client_base.hpp"
+#include "digitalcurling/client/client_helpers.hpp"
 
 using json = nlohmann::json;
 
@@ -117,7 +120,13 @@ void ClientBase::Connect(ClientConnectSetting const& setting) {
     sse_client.set_max_reconnect_attempts(setting.max_retry_count);
     sse_client.set_reconnect_interval(setting.retry_wait_time.count());
 
-    std::optional<std::exception> error;
+    // Written from the SSE thread and the event processing thread.
+    std::optional<std::runtime_error> error;
+    std::mutex error_mutex;
+    auto set_error = [&](std::optional<std::runtime_error> value) {
+        std::lock_guard lock(error_mutex);
+        error = std::move(value);
+    };
     std::atomic<bool> is_sse_stopped = false;
 
     std::mutex queue_mutex;
@@ -131,14 +140,14 @@ void ClientBase::Connect(ClientConnectSetting const& setting) {
     };
 
     sse_client.on_open([&]() {
-        error = std::nullopt;
+        set_error(std::nullopt);
         push_event("on_connected", [&setting]() {
             if (setting.callback.on_connected)
                 setting.callback.on_connected();
         });
     });
     sse_client.on_error([&](httplib::Error err) {
-        error = std::runtime_error("SSE connection error: " + httplib::to_string(err));
+        set_error(std::runtime_error("SSE connection error: " + httplib::to_string(err)));
     });
     sse_client.on_event("latest_state_update", [&](const httplib::sse::SSEMessage &msg) {
         // std::cout << "Received latest_state_update event: " << msg.data << std::endl << std::endl;
@@ -181,11 +190,11 @@ void ClientBase::Connect(ClientConnectSetting const& setting) {
             } catch (std::exception const& e) {
                 auto err = std::runtime_error("Exception occurred while processing " + event.first + ": " + e.what());
                 if (!setting.callback.on_event_process_error || !setting.callback.on_event_process_error(err)) {
-                    error = std::move(err);
+                    set_error(std::move(err));
                     sse_client.stop();
                 }
             } catch (...) {
-                error = std::runtime_error("Unknown exception occurred in event handling thread.");
+                set_error(std::runtime_error("Unknown exception occurred in event handling thread."));
                 sse_client.stop();
             }
         }
@@ -220,8 +229,8 @@ StateUpdateEventData ClientBase::ParseStateUpdateEventData(httplib::sse::SSEMess
     GameState state;
     state.end = std::min(json.at("end_number").get<std::uint8_t>(), max_end_);
     state.thinking_time_remaining = {
-        std::chrono::milliseconds(static_cast<uint32_t>(json.at("first_team_remaining_time").get<double>() * 1000)),
-        std::chrono::milliseconds(static_cast<uint32_t>(json.at("second_team_remaining_time").get<double>() * 1000))
+        RemainingTimeFromSeconds(json.at("first_team_remaining_time").get<double>()),
+        RemainingTimeFromSeconds(json.at("second_team_remaining_time").get<double>())
     };
 
     auto j_scores = json.at("score").get<TeamValue<std::vector<std::uint8_t>>>();
@@ -229,7 +238,13 @@ StateUpdateEventData ClientBase::ParseStateUpdateEventData(httplib::sse::SSEMess
     int end_completed = 0;
     if (total_shot == 16) end_completed = 1;
     std::cout << "\nEnd Completed: " << end_completed << "\n\n";
-    for (int e = 0; e < state.end + end_completed; e++) {
+    // A short array from the server leaves those ends unset instead of reading past it.
+    int const ends_to_read = std::min({
+        state.end + end_completed,
+        static_cast<int>(j_scores[Team::k0].size()),
+        static_cast<int>(j_scores[Team::k1].size()),
+    });
+    for (int e = 0; e < ends_to_read; e++) {
         scores_team0[e] = j_scores[Team::k0][e];
         scores_team1[e] = j_scores[Team::k1][e];
     }
