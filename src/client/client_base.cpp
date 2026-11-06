@@ -120,13 +120,10 @@ void ClientBase::Connect(ClientConnectSetting const& setting) {
     sse_client.set_max_reconnect_attempts(setting.max_retry_count);
     sse_client.set_reconnect_interval(setting.retry_wait_time.count());
 
-    // Written from the SSE thread and the event processing thread.
-    std::optional<std::runtime_error> error;
-    std::mutex error_mutex;
-    auto set_error = [&](std::optional<std::runtime_error> value) {
-        std::lock_guard lock(error_mutex);
-        error = std::move(value);
-    };
+    // One slot per writer, so no lock is needed and a reconnect can't hide or
+    // replace a processing error. SSE callbacks run on this thread, inside start().
+    std::optional<std::runtime_error> connection_error;
+    std::optional<std::runtime_error> processing_error; // read after the join below
     std::atomic<bool> is_sse_stopped = false;
 
     std::mutex queue_mutex;
@@ -140,14 +137,14 @@ void ClientBase::Connect(ClientConnectSetting const& setting) {
     };
 
     sse_client.on_open([&]() {
-        set_error(std::nullopt);
+        connection_error = std::nullopt;
         push_event("on_connected", [&setting]() {
             if (setting.callback.on_connected)
                 setting.callback.on_connected();
         });
     });
     sse_client.on_error([&](httplib::Error err) {
-        set_error(std::runtime_error("SSE connection error: " + httplib::to_string(err)));
+        connection_error = std::runtime_error("SSE connection error: " + httplib::to_string(err));
     });
     sse_client.on_event("latest_state_update", [&](const httplib::sse::SSEMessage &msg) {
         // std::cout << "Received latest_state_update event: " << msg.data << std::endl << std::endl;
@@ -190,11 +187,11 @@ void ClientBase::Connect(ClientConnectSetting const& setting) {
             } catch (std::exception const& e) {
                 auto err = std::runtime_error("Exception occurred while processing " + event.first + ": " + e.what());
                 if (!setting.callback.on_event_process_error || !setting.callback.on_event_process_error(err)) {
-                    set_error(std::move(err));
+                    if (!processing_error) processing_error = std::move(err);
                     sse_client.stop();
                 }
             } catch (...) {
-                set_error(std::runtime_error("Unknown exception occurred in event handling thread."));
+                if (!processing_error) processing_error = std::runtime_error("Unknown exception occurred in event handling thread.");
                 sse_client.stop();
             }
         }
@@ -208,7 +205,9 @@ void ClientBase::Connect(ClientConnectSetting const& setting) {
     cond_var.notify_all();
     processing_thread.join();
 
-    if (error.has_value()) throw std::move(error.value());
+    // A processing error is the root cause: a connection error after it comes from stopping.
+    if (processing_error.has_value()) throw std::move(processing_error.value());
+    if (connection_error.has_value()) throw std::move(connection_error.value());
 }
 
 StateUpdateEventData ClientBase::ParseStateUpdateEventData(httplib::sse::SSEMessage const& message) {
@@ -238,15 +237,19 @@ StateUpdateEventData ClientBase::ParseStateUpdateEventData(httplib::sse::SSEMess
     int end_completed = 0;
     if (total_shot == 16) end_completed = 1;
     std::cout << "\nEnd Completed: " << end_completed << "\n\n";
-    // A short array from the server leaves those ends unset instead of reading past it.
-    int const ends_to_read = std::min({
-        state.end + end_completed,
-        static_cast<int>(j_scores[Team::k0].size()),
-        static_cast<int>(j_scores[Team::k1].size()),
-    });
+    // A short array from the server leaves those ends unset instead of reading
+    // past it. It isn't an error, which would stop the client mid-game, but the
+    // engine's score would be wrong, so say so.
+    auto const& j_scores0 = j_scores[Team::k0];
+    auto const& j_scores1 = j_scores[Team::k1];
+    int const ends_to_read = state.end + end_completed;
+    if (static_cast<int>(std::min(j_scores0.size(), j_scores1.size())) < ends_to_read) {
+        std::cerr << "[Warning] score arrays from the server are shorter than the " << ends_to_read
+                  << " ends played: " << j_scores0.size() << " and " << j_scores1.size() << std::endl;
+    }
     for (int e = 0; e < ends_to_read; e++) {
-        scores_team0[e] = j_scores[Team::k0][e];
-        scores_team1[e] = j_scores[Team::k1][e];
+        if (e < static_cast<int>(j_scores0.size())) scores_team0[e] = j_scores0[e];
+        if (e < static_cast<int>(j_scores1.size())) scores_team1[e] = j_scores1[e];
     }
     state.scores = {{ std::move(scores_team0), std::move(scores_team1) }};
 
