@@ -410,7 +410,9 @@ float Skip::search(UctNode* current_node, int k)
             // }
         }
 
-        auto next_node = current_node->GetChild(std::make_pair(action, sim_slot));
+        // On the last shot every descent requests a new child, so the lookup isn't
+        // needed; it would also race with AllocateNextChildIndex resizing the vector.
+        UctNode* next_node = is_last_shot ? nullptr : current_node->GetChild(std::make_pair(action, sim_slot));
 
         // std::cout << action << "  " << sim_slot << "  " << next_node << std::endl;
 
