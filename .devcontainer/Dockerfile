@@ -39,6 +39,7 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
 ARG TORCH_VERSION=2.15.0
 ARG TORCH_CUDA=134
 # SHA256 of the archive below: change it together with the two versions above.
+# devcontainer.json overrides all three, so keep them in sync there.
 ARG LIBTORCH_SHA256=786f18f4af224e1caa2f649c8c0db6c3cc3dda98f47e6d8cd863a3c3b86859f5
 RUN curl -fsSL --retry 3 -o /tmp/libtorch.zip \
         "https://download.pytorch.org/libtorch/cu${TORCH_CUDA}/libtorch-shared-with-deps-${TORCH_VERSION}%2Bcu${TORCH_CUDA}.zip" \

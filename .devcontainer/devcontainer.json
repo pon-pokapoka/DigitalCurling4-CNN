@@ -8,6 +8,8 @@
             "UBUNTU_VERSION": "26.04",
             "TORCH_VERSION": "2.15.0",
             "TORCH_CUDA": "134",
+            // SHA256 of that libtorch archive: change it together with the two lines above.
+            "LIBTORCH_SHA256": "786f18f4af224e1caa2f649c8c0db6c3cc3dda98f47e6d8cd863a3c3b86859f5",
             // Optional, off by default: set DC4_CLAUDE_CODE=1 in .devcontainer/local.env
             // (read by dev.sh) or in the environment VS Code starts from.
             "INSTALL_CLAUDE_CODE": "${localEnv:DC4_CLAUDE_CODE:0}"
