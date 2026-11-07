@@ -115,7 +115,8 @@ protected:
     void GoToLastShot(int end) {
         state_.end = static_cast<std::uint8_t>(end);
         state_.shot = static_cast<std::uint8_t>(15);
-        for (int e = 0; e < end; ++e) {
+        int const slots = static_cast<int>(state_.scores.team0.size());
+        for (int e = 0; e < end && e < slots; ++e) {
             state_.scores.team0[e] = 0;
             state_.scores.team1[e] = 0;
         }
@@ -323,8 +324,7 @@ TEST_F(ApplyMoveTest, ExtraEndScoreDecidesWinner) {
     EXPECT_EQ(state_.game_result->reason, dc::GameResult::Reason::kScore);
 }
 
-// Known bug: a tie after the last regular end ends the game as kDraw instead of playing an extra end, see review
-TEST_F(ApplyMoveTest, DISABLED_TieAfterLastEndGoesToExtraEnd) {
+TEST_F(ApplyMoveTest, TieAfterLastEndGoesToExtraEnd) {
     GoToLastShot(setting_.max_end - 1);
     state_.scores.team0[0] = 1;
     state_.scores.team1[1] = 1;
@@ -333,6 +333,51 @@ TEST_F(ApplyMoveTest, DISABLED_TieAfterLastEndGoesToExtraEnd) {
     EXPECT_FALSE(state_.IsGameOver());
     EXPECT_EQ(state_.end, setting_.max_end);
     EXPECT_EQ(state_.shot, 0);
+}
+
+TEST_F(ApplyMoveTest, BlankTiedLastEndKeepsHammerForExtraEnd) {
+    GoToLastShot(setting_.max_end - 1);
+    Throw(std::nullopt);
+
+    ASSERT_FALSE(state_.IsGameOver());
+    EXPECT_EQ(state_.hammer, dc::Team::k1);
+}
+
+TEST_F(ApplyMoveTest, TeamThatTiesTheScoreLosesHammerForExtraEnd) {
+    GoToLastShot(setting_.max_end - 1);
+    state_.scores.team0[0] = 1;
+    Throw(kTee);  // team1 scores 1: tied 1-1
+
+    ASSERT_FALSE(state_.IsGameOver());
+    EXPECT_EQ(state_.end, setting_.max_end);
+    EXPECT_EQ(state_.hammer, dc::Team::k0);
+}
+
+TEST_F(ApplyMoveTest, BlankExtraEndPlaysAnotherExtraEnd) {
+    GoToLastShot(setting_.max_end);  // extra end, tied 0-0
+    Throw(std::nullopt);
+
+    ASSERT_FALSE(state_.IsGameOver());
+    EXPECT_EQ(state_.end, setting_.max_end + 1);
+    EXPECT_EQ(state_.shot, 0);
+}
+
+TEST_F(ApplyMoveTest, SecondExtraEndScoreDecidesWinner) {
+    GoToLastShot(setting_.max_end + 1);  // past the score slots, tied 0-0
+    Throw(kTee);
+
+    ASSERT_TRUE(state_.IsGameOver());
+    EXPECT_EQ(state_.game_result->winner, dc::Team::k1);
+    EXPECT_EQ(state_.game_result->reason, dc::GameResult::Reason::kScore);
+}
+
+TEST_F(ApplyMoveTest, TieAtExtraEndLimitIsADraw) {
+    GoToLastShot(dc::GameState::kExtraEndMax - 1);
+    Throw(std::nullopt);
+
+    ASSERT_TRUE(state_.IsGameOver());
+    EXPECT_EQ(state_.game_result->winner, dc::Team::kInvalid);
+    EXPECT_EQ(state_.game_result->reason, dc::GameResult::Reason::kDraw);
 }
 
 }  // namespace
