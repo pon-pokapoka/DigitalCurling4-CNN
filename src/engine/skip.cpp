@@ -599,7 +599,9 @@ std::pair<torch::Tensor, std::vector<float>> Skip::EvaluateGameState(std::vector
 
     int size = static_cast<int>(game_states.size());
 
-    auto policy = F::softmax(outputs->elements()[0].toTensor().reshape({size, policy_weight * policy_width * policy_rotation}).to(torch::kCPU), 1);
+    // Softmax in float on the device: bf16 on the CPU is slow and rounds close moves to ties.
+    auto policy = F::softmax(outputs->elements()[0].toTensor().to(torch::kFloat).reshape({size, policy_weight * policy_width * policy_rotation}), 1)
+                      .to(torch::kCPU).contiguous();
 
     std::vector<std::vector<float>> win_rate_array(size, std::vector<float>(kShotPerEnd_*2+1));
 
@@ -614,7 +616,9 @@ std::pair<torch::Tensor, std::vector<float>> Skip::EvaluateGameState(std::vector
     // if (size!=1) std::cout << F::softmax(outputs, 1)[0] << std::endl;
 
 
-    torch::Tensor score_prob = F::softmax(outputs->elements()[1].toTensor().to(torch::kCPU), 1);
+    torch::Tensor score_prob = F::softmax(outputs->elements()[1].toTensor().to(torch::kFloat), 1).to(torch::kCPU).contiguous();
+    float const* score_prob_data = score_prob.data_ptr<float>();
+    int const score_stride = static_cast<int>(score_prob.size(1));
     std::vector<float> win_prob(size, 0);
 
     for (auto n=0; n < size; ++n){
@@ -650,7 +654,7 @@ std::pair<torch::Tensor, std::vector<float>> Skip::EvaluateGameState(std::vector
             }
 
             for (auto i=0; i < kShotPerEnd_*2+1; ++i) {
-                win_prob[n] += score_prob.index({n, i}).item<float>() * win_rate_array[n][i];
+                win_prob[n] += score_prob_data[n * score_stride + i] * win_rate_array[n][i];
             }
             if (team_ != game_states[n].hammer) win_prob[n] = 1 - win_prob[n];
         }
