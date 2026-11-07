@@ -34,9 +34,9 @@
         // local.env.example). VS Code forwards the ssh-agent by itself.
     ],
     "postCreateCommand": "cmake --fresh -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release",
-    // If you set up commit signing, warn (non-fatally) when it would fail.
-    // Silent for everyone else.
-    "postStartCommand": ".devcontainer/setup-signing.sh --check",
+    // Trust a private CA if DC4_CA_CERT is configured (dev.sh sets it), and if you
+    // set up commit signing, warn (non-fatally) when it would fail. Silent otherwise.
+    "postStartCommand": "if [ -n \"${DC4_CA_CERT:-}\" ]; then .devcontainer/setup-ca.sh; fi; .devcontainer/setup-signing.sh --check",
     "customizations": {
         "vscode": {
             "extensions": [

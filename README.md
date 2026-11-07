@@ -71,6 +71,7 @@ turn them on in `.devcontainer/local.env` (not committed; copy
 | `DC4_CLAUDE_CODE=1` | Install Claude Code in the image; keep its login in volume `dc4-cnn-claude` | `dev.sh rebuild` |
 | `DC4_GITHUB=1` | Keep the GitHub CLI login in volume `dc4-cnn-gh` | `dev.sh down && dev.sh up` |
 | `DC4_GIT_CONFIG=1` | Keep your git config (identity, signing) in volume `dc4-cnn-git` | `dev.sh down && dev.sh up` |
+| `DC4_CA_CERT=<host path>` | Trust a private CA, for a TLS server that needs it: mounts that public certificate and runs [`setup-ca.sh`](.devcontainer/setup-ca.sh) on start | `dev.sh down && dev.sh up` |
 
 Only the ccache volume is always created. To sign commits with your GitHub-registered SSH
 signing key, set `DC4_SSH_AGENT=1` and `DC4_GIT_CONFIG=1` and run
@@ -88,6 +89,16 @@ docker run --rm --gpus all cnn-client:latest \
     --host http://server:5000 --id <match-id> --team 0 --auth-id user --auth-pw pass
 ```
 
+The image trusts the public CAs. For a TLS server with a private CA, mount the CA's public certificate
+and point `SSL_CERT_FILE` at it. This works with a non-root user and a read-only root filesystem:
+
+```bash
+docker run --rm --gpus all \
+    -v "$PWD/ca.crt:/etc/dc4/ca.crt:ro" -e SSL_CERT_FILE=/etc/dc4/ca.crt \
+    cnn-client:latest \
+    --host https://server --id <match-id> --team 0 --auth-id user --auth-pw pass
+```
+
 ```yaml
 # Example Pod spec
 containers:
@@ -101,6 +112,18 @@ containers:
     resources:
       limits:
         nvidia.com/gpu: 1
+    # Only for a TLS server with a private CA:
+    env:
+      - name: SSL_CERT_FILE
+        value: /etc/dc4/ca.crt
+    volumeMounts:
+      - name: server-ca
+        mountPath: /etc/dc4
+        readOnly: true
+volumes:
+  - name: server-ca
+    configMap:
+      name: server-ca   # holds the public certificate as key ca.crt
 ```
 
 ## 使用方法

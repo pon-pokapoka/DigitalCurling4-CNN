@@ -8,7 +8,7 @@
 #   .devcontainer/dev.sh rebuild   # rebuild image from scratch and recreate container
 #   .devcontainer/dev.sh down      # stop and remove the container
 #
-# Personal options (SSH agent, Claude Code, GitHub CLI, git config volumes) are
+# Personal options (SSH agent, Claude Code, GitHub CLI, git config, private CA) are
 # read from .devcontainer/local.env, which is not committed; see
 # local.env.example. Without it you get a plain container that needs no SSH key,
 # GitHub or Claude and creates no personal volumes.
@@ -17,6 +17,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONTAINER_NAME="dc4-cnn-dev"   # keep in sync with runArgs in devcontainer.json
 AGENT_TARGET="/run/host-ssh-agent.sock"
+CA_TARGET="/run/dc4-ca.crt"
 
 LOCAL_ENV="$REPO_ROOT/.devcontainer/local.env"
 if [[ -f "$LOCAL_ENV" ]]; then
@@ -70,6 +71,19 @@ if [[ "$DC4_SSH_AGENT" == 1 ]]; then
   up_args+=(--mount "type=bind,source=$SSH_AUTH_SOCK,target=$AGENT_TARGET"
             --remote-env "SSH_AUTH_SOCK=$AGENT_TARGET")
   exec_args+=(--remote-env "SSH_AUTH_SOCK=$AGENT_TARGET")
+fi
+
+# DC4_CA_CERT=<host path>: mount that public certificate; setup-ca.sh trusts it
+# when the container starts.
+if [[ -n "${DC4_CA_CERT:-}" ]]; then
+  ca_file="$(readlink -f "$DC4_CA_CERT" || true)"
+  if [[ ! -f "$ca_file" ]]; then
+    echo "DC4_CA_CERT=$DC4_CA_CERT is not a file on the host." >&2
+    exit 1
+  fi
+  up_args+=(--mount "type=bind,source=$ca_file,target=$CA_TARGET"
+            --remote-env "DC4_CA_CERT=$CA_TARGET")
+  exec_args+=(--remote-env "DC4_CA_CERT=$CA_TARGET")
 fi
 
 dc_up() { "${DC[@]}" up --workspace-folder "$REPO_ROOT" "${up_args[@]}" "$@"; }
