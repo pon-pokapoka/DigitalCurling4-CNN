@@ -6,6 +6,9 @@
 #   docker run --rm --gpus all cnn-client:latest --host http://server:5000 --id <match> --team 0 \
 #       --auth-id user --auth-pw pass
 #
+# For a server with a private CA, mount the CA certificate and set SSL_CERT_FILE:
+#   docker run ... -v "$PWD/ca.crt:/etc/dc4/ca.crt:ro" -e SSL_CERT_FILE=/etc/dc4/ca.crt ...
+#
 # Stages:
 #   toolchain : CUDA devel + compilers + libtorch (cached; changes only when versions change)
 #   build     : compiles the client and stages a minimal /out tree
