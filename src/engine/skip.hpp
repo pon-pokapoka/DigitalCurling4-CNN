@@ -43,7 +43,6 @@ class Skip
 
         void SimulateMove(UctNode*, std::pair<int, int>, int);
         std::pair<torch::Tensor, std::vector<float>> EvaluateGameState(std::vector<dc::GameState>, dc::GameSetting);
-        void EvaluateQueue();
 
         dc::moves::Move command(const dc::GameState&);
 
