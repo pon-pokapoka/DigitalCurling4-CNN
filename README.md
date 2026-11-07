@@ -21,7 +21,7 @@ This program is inspired by AlphaGo Zero and dlshogi.
 - LibTorch
 - CUDA
 - CuDNN
-These required libraries are automatically resolved by [Dockerfile]{./Dockerfile}.
+These required libraries are provided by the container images (see [Docker / Dev Container](#docker--dev-container)).
 
 以下のライブラリは CMake によって自動的に解決されます。
 - [DigitalCurling](https://github.com/digitalcurling/DigitalCurling) 4.0 以上
@@ -41,6 +41,90 @@ These required libraries are automatically resolved by [Dockerfile]{./Dockerfile
    cmake -DCMAKE_BUILD_TYPE=Release ..
    cmake --build . --config Release
    ```
+
+## Docker / Dev Container
+
+GPU use requires the NVIDIA driver and the NVIDIA Container Toolkit on the host.
+
+#### Development (Dev Container, CLI)
+[`.devcontainer/`](.devcontainer/) defines the development image (CUDA devel + libtorch + gdb/clangd/ccache).
+Start it with the [devcontainer CLI](https://github.com/devcontainers/cli) (`npm install -g @devcontainers/cli`):
+
+```bash
+.devcontainer/dev.sh up       # build the image and start the container (first run also configures CMake)
+.devcontainer/dev.sh build    # cmake --build build inside the container
+.devcontainer/dev.sh shell    # interactive shell inside the container
+.devcontainer/dev.sh down     # stop and remove the container
+
+# without the wrapper
+devcontainer up --workspace-folder .
+devcontainer exec --workspace-folder . bash
+```
+
+The container needs no SSH key, GitHub account or Claude. Personal extras are off by default;
+turn them on in `.devcontainer/local.env` (not committed; copy
+[`local.env.example`](.devcontainer/local.env.example)), which `dev.sh` reads:
+
+| Option | Effect | Apply with |
+|---|---|---|
+| `DC4_SSH_AGENT=1` | Forward the host ssh-agent (git over SSH, commit signing) | `dev.sh down && dev.sh up` |
+| `DC4_CLAUDE_CODE=1` | Install Claude Code in the image; keep its login in volume `dc4-cnn-claude` | `dev.sh rebuild` |
+| `DC4_GITHUB=1` | Keep the GitHub CLI login in volume `dc4-cnn-gh` | `dev.sh down && dev.sh up` |
+| `DC4_GIT_CONFIG=1` | Keep your git config (identity, signing) in volume `dc4-cnn-git` | `dev.sh down && dev.sh up` |
+| `DC4_CA_CERT=<host path>` | Trust a private CA, for a TLS server that needs it: mounts that public certificate and runs [`setup-ca.sh`](.devcontainer/setup-ca.sh) on start | `dev.sh down && dev.sh up` |
+
+Only the ccache volume is always created. To sign commits with your GitHub-registered SSH
+signing key, set `DC4_SSH_AGENT=1` and `DC4_GIT_CONFIG=1` and run
+`.devcontainer/setup-signing.sh` once inside the container.
+
+#### Runtime image (Kubernetes)
+The root [`Dockerfile`](Dockerfile) is a multi-stage build. The final image is based on `nvidia/cuda:*-base`
+and contains only the binary, the libtorch shared libraries, and the model.
+It runs as a non-root user (UID 10001), and `ENTRYPOINT` is the client itself, so pass connection options via the Pod's `args:`.
+The model files (`src/engine/model/traced.pt`, `win_table.csv`) must be present in the build context.
+
+```bash
+docker build -t cnn-client:latest .
+docker run --rm --gpus all cnn-client:latest \
+    --host http://server:5000 --id <match-id> --team 0 --auth-id user --auth-pw pass
+```
+
+The image trusts the public CAs. For a TLS server with a private CA, mount the CA's public certificate
+and point `SSL_CERT_FILE` at it. This works with a non-root user and a read-only root filesystem:
+
+```bash
+docker run --rm --gpus all \
+    -v "$PWD/ca.crt:/etc/dc4/ca.crt:ro" -e SSL_CERT_FILE=/etc/dc4/ca.crt \
+    cnn-client:latest \
+    --host https://server --id <match-id> --team 0 --auth-id user --auth-pw pass
+```
+
+```yaml
+# Example Pod spec
+containers:
+  - name: client
+    image: cnn-client:latest
+    args: ["--host", "http://server:5000", "--id", "$(MATCH_ID)", "--team", "0"]
+    securityContext:
+      runAsNonRoot: true
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+    resources:
+      limits:
+        nvidia.com/gpu: 1
+    # Only for a TLS server with a private CA:
+    env:
+      - name: SSL_CERT_FILE
+        value: /etc/dc4/ca.crt
+    volumeMounts:
+      - name: server-ca
+        mountPath: /etc/dc4
+        readOnly: true
+volumes:
+  - name: server-ca
+    configMap:
+      name: server-ca   # holds the public certificate as key ca.crt
+```
 
 ## 使用方法
 
@@ -62,7 +146,7 @@ These required libraries are automatically resolved by [Dockerfile]{./Dockerfile
 | `--id` | 接続先のゲームIDを指定します。 | none |
 | `--team` | 接続するチームを指定します。(0または1) | 0 |
 | `--auth-id` | Basic認証のIDを指定します。 | `user` |
-| `--auth-password` | Basic認証のパスワードを指定します。 | `password` |
+| `--auth-pw` | Basic認証のパスワードを指定します。 | `password` |
 | `--plugin-dir` | プラグインのディレクトリを指定します。 | `./plugins` |
 
 オプションは全て任意オプションですが、`--host` および `--id` はクライアントの起動に必要です。  

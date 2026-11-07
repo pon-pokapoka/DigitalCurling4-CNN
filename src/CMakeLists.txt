@@ -6,16 +6,34 @@ function(target_compile_definition_if_exists target_name definition variable_nam
 endfunction()
 
 # Torch (libtorch)
-set(LIBTORCH_DIR /usr/local/libtorch/)
+set(LIBTORCH_DIR /usr/local/libtorch CACHE PATH "LibTorch install prefix")
 set(CAFFE2_USE_CUDNN 1)
 set(CAFFE2_USE_CUSPARSELT 1)
 list(APPEND CMAKE_PREFIX_PATH ${LIBTORCH_DIR})
 find_package(Torch REQUIRED)
 
 # OpenMP
-find_package(OpenMP)
+find_package(OpenMP REQUIRED)
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
+
+# --- Build engine library ---
+# Engine sources (DIGITALCURLING_CLIENT_SOURCES from client_config.cmake) are
+# compiled once into a static library shared by the client and the unit tests.
+set(DIGITALCURLING_CLIENT_ENGINE_LIB ${PROJECT_NAME}_engine)
+add_library(${DIGITALCURLING_CLIENT_ENGINE_LIB} STATIC ${DIGITALCURLING_CLIENT_SOURCES})
+target_include_directories(${DIGITALCURLING_CLIENT_ENGINE_LIB}
+    PUBLIC ${CMAKE_SOURCE_DIR}/include
+    PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
+)
+target_link_libraries(${DIGITALCURLING_CLIENT_ENGINE_LIB} PUBLIC ${TORCH_LIBRARIES})
+target_compile_features(${DIGITALCURLING_CLIENT_ENGINE_LIB} PUBLIC cxx_std_17)
+# The engine only needs the header-only plugin API; the client executable links
+# the plugin loader (and the bundled plugins) itself.
+target_link_libraries(${DIGITALCURLING_CLIENT_ENGINE_LIB} PUBLIC digitalcurling::plugin_api)
+if (WIN32)
+    target_compile_definitions(${DIGITALCURLING_CLIENT_ENGINE_LIB} PRIVATE WIN32_LEAN_AND_MEAN)
+endif()
 
 # --- Build client ---
 # sources
@@ -24,14 +42,13 @@ add_executable(${PROJECT_NAME}
     ${CMAKE_CURRENT_SOURCE_DIR}/client_setup.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/client/client_base.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/client/client_factory.cpp
-    ${DIGITALCURLING_CLIENT_SOURCES}
 )
 target_include_directories(${PROJECT_NAME}
     PRIVATE ${CMAKE_SOURCE_DIR}/include
     PRIVATE ${CMAKE_CURRENT_BINARY_DIR}
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
 )
-target_link_libraries(${PROJECT_NAME} PRIVATE CLI11::CLI11 httplib ${TORCH_LIBRARIES})
+target_link_libraries(${PROJECT_NAME} PRIVATE ${DIGITALCURLING_CLIENT_ENGINE_LIB} CLI11::CLI11 httplib ${TORCH_LIBRARIES})
 target_compile_features(${PROJECT_NAME} PRIVATE cxx_std_17)
 
 # definitions
@@ -78,4 +95,11 @@ if (DIGITALCURLING_CLIENT_USE_LOADER)
 else()
     target_link_libraries(${PROJECT_NAME} PUBLIC digitalcurling::plugin_api)
     message(STATUS "Building client with no plugin loader")
+endif()
+
+# --- Unit tests ---
+# Added from here (not the top-level CMakeLists.txt) so the tests see the Torch
+# targets and OpenMP flags configured in this directory.
+if (DIGITALCURLING_CLIENT_BUILD_TESTS)
+    add_subdirectory(${PROJECT_SOURCE_DIR}/tests ${PROJECT_BINARY_DIR}/tests)
 endif()
