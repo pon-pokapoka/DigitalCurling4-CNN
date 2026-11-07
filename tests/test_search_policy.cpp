@@ -4,10 +4,12 @@
 
 #include <torch/script.h>
 
+#include <atomic>
 #include <cmath>
 #include <limits>
 #include <random>
 #include <set>
+#include <vector>
 
 #include "engine/search_policy.hpp"
 
@@ -21,6 +23,11 @@ torch::Tensor Visits() { return torch::zeros({1, kActions}, torch::kInt); }
 torch::Tensor AllLegal() { return torch::ones({1, kActions}, torch::kBool); }
 
 float At(torch::Tensor const& t, int a) { return t.index({0, a}).item<float>(); }
+
+int LeastVisited(torch::Tensor const& visits, torch::Tensor const& legal, std::mt19937& gen) {
+    auto const flat = visits.to(torch::kInt).contiguous();
+    return sp::LeastVisitedLegalAction(flat.data_ptr<int>(), sp::LegalActions(legal), gen);
+}
 
 // --- LegalMask ---------------------------------------------------------------
 
@@ -126,6 +133,62 @@ TEST(VirtualLoss, MakesThePathLessAttractiveForTheChooser) {
     }
 }
 
+// --- LegalActions ------------------------------------------------------------
+
+TEST(LegalActions, ListsTheTrueEntries) {
+    auto legal = torch::zeros({1, kActions}, torch::kBool);
+    legal.index_put_({0, 3}, true);
+    legal.index_put_({0, 700}, true);
+    EXPECT_EQ(sp::LegalActions(legal), (std::vector<int>{3, 700}));
+}
+
+// --- BestPuctAction ----------------------------------------------------------
+
+TEST(BestPuctAction, MatchesTheHighestPuctScore) {
+    auto const legal_mask = sp::LegalMask();
+    auto const legal = sp::LegalActions(legal_mask);
+    torch::manual_seed(1);
+    for (int round = 0; round < 50; ++round) {
+        // A few visited children, as in a real node. Visits are only on legal shots.
+        auto visits = Visits();
+        auto sums = Zeros();
+        for (int k = 0; k < 40; ++k) {
+            int const a = legal[torch::randint(legal.size(), {1}).item<int>()];
+            int const n = torch::randint(1, 30, {1}).item<int>();
+            visits.index_put_({0, a}, n);
+            sums.index_put_({0, a}, torch::rand({1}).item<float>() * n);
+        }
+        auto const policy = torch::softmax(torch::randn({1, kActions}) * 2, 1);
+        auto const flat_visits = visits.contiguous();
+        auto const flat_sums = sums.contiguous();
+        auto const flat_policy = policy.contiguous();
+        for (bool my_turn : {true, false}) {
+            auto const score = sp::PuctScore(visits, sums, policy, legal_mask, my_turn, config::c_puct);
+            int const best = sp::BestPuctAction(flat_visits.data_ptr<int>(), flat_sums.data_ptr<float>(),
+                                                flat_policy.data_ptr<float>(), legal, my_turn, config::c_puct);
+            EXPECT_EQ(best, score.argmax().item<int>()) << "round " << round << " my_turn=" << my_turn;
+        }
+    }
+}
+
+TEST(BestPuctAction, ReadsAtomicStatistics) {
+    std::vector<std::atomic<int>> visits(kActions);
+    std::vector<std::atomic<float>> sums(kActions);
+    std::vector<float> policy(kActions, 0.f);
+    visits[5] = 10;
+    sums[5] = 9.f;
+    visits[6] = 10;
+    sums[6] = 1.f;
+    EXPECT_EQ(sp::BestPuctAction(visits, sums, policy.data(), {5, 6}, true, config::c_puct), 5);
+    EXPECT_EQ(sp::BestPuctAction(visits, sums, policy.data(), {5, 6}, false, config::c_puct), 6);
+}
+
+TEST(BestPuctAction, NoLegalShot) {
+    std::vector<int> const visits(kActions, 0);
+    std::vector<float> const sums(kActions, 0.f);
+    EXPECT_EQ(sp::BestPuctAction(visits, sums, sums.data(), {}, true, config::c_puct), -1);
+}
+
 // --- LeastVisitedLegalAction -------------------------------------------------
 
 TEST(LeastVisitedLegalAction, PicksTheLeastVisitedLegalShot) {
@@ -135,12 +198,12 @@ TEST(LeastVisitedLegalAction, PicksTheLeastVisitedLegalShot) {
     visits.index_put_({0, 10}, 1);
     visits.index_put_({0, 11}, 0);
     legal.index_put_({0, 11}, false);  // fewer visits, but illegal
-    EXPECT_EQ(sp::LeastVisitedLegalAction(visits, legal, gen), 10);
+    EXPECT_EQ(LeastVisited(visits, legal, gen), 10);
 }
 
 TEST(LeastVisitedLegalAction, NoLegalShot) {
     std::mt19937 gen(1);
-    EXPECT_EQ(sp::LeastVisitedLegalAction(Visits(), torch::zeros({1, kActions}, torch::kBool), gen), -1);
+    EXPECT_EQ(LeastVisited(Visits(), torch::zeros({1, kActions}, torch::kBool), gen), -1);
 }
 
 TEST(LeastVisitedLegalAction, TriesEveryLegalShotOnceBeforeAnyTwice) {
@@ -150,7 +213,7 @@ TEST(LeastVisitedLegalAction, TriesEveryLegalShotOnceBeforeAnyTwice) {
     auto visits = Visits();
     std::set<int> seen;
     for (int k = 0; k < n_legal; ++k) {
-        int const a = sp::LeastVisitedLegalAction(visits, legal, gen);
+        int const a = LeastVisited(visits, legal, gen);
         ASSERT_GE(a, 0);
         ASSERT_TRUE(legal.index({0, a}).item<bool>()) << a;
         ASSERT_TRUE(seen.insert(a).second) << "shot " << a << " tried twice after " << k << " picks";
@@ -162,7 +225,7 @@ TEST(LeastVisitedLegalAction, TriesEveryLegalShotOnceBeforeAnyTwice) {
 TEST(LeastVisitedLegalAction, BreaksTiesRandomly) {
     std::mt19937 gen(7);
     std::set<int> picks;
-    for (int k = 0; k < 200; ++k) picks.insert(sp::LeastVisitedLegalAction(Visits(), AllLegal(), gen));
+    for (int k = 0; k < 200; ++k) picks.insert(LeastVisited(Visits(), AllLegal(), gen));
     EXPECT_GT(picks.size(), 100u);  // not always the first index
 }
 

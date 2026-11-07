@@ -175,10 +175,27 @@ TEST(UctNode, VirtualUpdatesDoNotTouchMinMax) {
     EXPECT_FLOAT_EQ(node.GetChildMinValue()[0][idx].item<float>(), 0.5f);
 }
 
+TEST(UctNode, ChildStatisticsSurviveConcurrentUpdates) {
+    UctNode node;
+    int const threads = 8;
+    int const per_thread = 2000;
+    int const idx = 9;
+    std::vector<std::thread> workers;
+    for (int t = 0; t < threads; ++t) {
+        workers.emplace_back([&] {
+            for (int i = 0; i < per_thread; ++i) node.SetChildCountValue(idx, 1, 1.f, true);
+        });
+    }
+    for (auto& w : workers) w.join();
+
+    EXPECT_EQ(node.ChildVisits()[idx].load(), threads * per_thread);
+    EXPECT_FLOAT_EQ(node.ChildSums()[idx].load(), static_cast<float>(threads * per_thread));
+}
+
 TEST(UctNode, SetEvaluatedResultsStoresPolicyAndValue) {
     UctNode node;
     auto policy = torch::rand({kActions});
-    node.SetEvaluatedResults(policy, 0.42f);
+    node.SetEvaluatedResults(policy.data_ptr<float>(), 0.42f);
     EXPECT_TRUE(node.GetEvaluated());
     EXPECT_FLOAT_EQ(node.GetValue(), 0.42f);
     EXPECT_TRUE(torch::equal(node.GetPolicy(), policy));

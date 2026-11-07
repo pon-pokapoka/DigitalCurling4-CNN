@@ -16,6 +16,7 @@
 #include <cmath>
 #include <limits>
 #include <random>
+#include <vector>
 
 #include <torch/torch.h>
 
@@ -36,7 +37,20 @@ inline torch::Tensor LegalMask()
     return mask;
 }
 
-// PUCT score from the perspective of the side choosing at the node.
+// Indices of the true entries of a {1, kNumActions} bool mask.
+inline std::vector<int> LegalActions(torch::Tensor const& legal)
+{
+    auto mask = legal.to(torch::kBool).contiguous();
+    bool const* data = mask.data_ptr<bool>();
+    std::vector<int> actions;
+    for (int a = 0; a < static_cast<int>(mask.numel()); ++a) {
+        if (data[a]) actions.push_back(a);
+    }
+    return actions;
+}
+
+// PUCT score from the perspective of the side choosing at the node. This tensor
+// form is the reference that BestPuctAction, used by the search, is tested against.
 // An unvisited child counts as a loss (q = 0) for whoever is choosing, so both
 // teams get the same pessimistic first-play value; the exploration term u is
 // largest for unvisited children, so high-prior shots are still tried first.
@@ -58,6 +72,39 @@ inline torch::Tensor PuctScore(torch::Tensor const& child_visits,
     return torch::where(legal, score, torch::full_like(score, -std::numeric_limits<float>::infinity()));
 }
 
+// The legal action with the highest PuctScore, without tensors: this runs at
+// every tree level of every descent. `child_visits` and `child_sums` are indexed
+// by action and may be atomics. Returns -1 if no action is legal.
+template <class Visits, class Sums>
+inline int BestPuctAction(Visits const& child_visits,
+                          Sums const& child_sums,
+                          float const* policy,
+                          std::vector<int> const& legal_actions,
+                          bool my_turn,
+                          float c_puct)
+{
+    int total = 0;
+    for (int a : legal_actions) total += child_visits[a];
+    float const sqrt_total = std::sqrt(static_cast<float>(total) + 1);
+
+    int best = -1;
+    float best_score = -std::numeric_limits<float>::infinity();
+    for (int a : legal_actions) {
+        float const n = static_cast<float>(int(child_visits[a]));
+        float q = 0.f;
+        if (n > 0) {
+            q = float(child_sums[a]) / n;
+            if (!my_turn) q = 1 - q;
+        }
+        float const score = q + c_puct * (policy[a] * sqrt_total / (1 + n));
+        if (score > best_score) {
+            best_score = score;
+            best = a;
+        }
+    }
+    return best;
+}
+
 // Value to add to a child's value sum for `count` virtual-loss visits
 // (count < 0 undoes them). Virtual loss must look like a loss to the side
 // choosing at the node, so other threads avoid the path: 0 (loss for us) at
@@ -70,26 +117,21 @@ inline float VirtualLossValue(bool my_turn, int count)
 // Root exploration: the legal action with the fewest visits, ties broken
 // uniformly at random, so every legal shot is tried once before any is tried
 // twice. Returns -1 if no action is legal.
-inline int LeastVisitedLegalAction(torch::Tensor const& child_visits,
-                                   torch::Tensor const& legal,
+template <class Visits>
+inline int LeastVisitedLegalAction(Visits const& child_visits,
+                                   std::vector<int> const& legal_actions,
                                    std::mt19937& gen)
 {
-    auto visits = child_visits.to(torch::kInt).contiguous();
-    auto mask = legal.to(torch::kBool).contiguous();
-    int const* v = visits.data_ptr<int>();
-    bool const* l = mask.data_ptr<bool>();
-    int const n = static_cast<int>(visits.numel());
-
     int best = -1;
     int best_visits = INT_MAX;
     int ties = 0;
-    for (int a = 0; a < n; ++a) {
-        if (!l[a]) continue;
-        if (v[a] < best_visits) {
-            best_visits = v[a];
+    for (int a : legal_actions) {
+        int const visits = child_visits[a];
+        if (visits < best_visits) {
+            best_visits = visits;
             best = a;
             ties = 1;
-        } else if (v[a] == best_visits) {
+        } else if (visits == best_visits) {
             // reservoir sampling: each tied action ends up chosen with probability 1/ties
             ++ties;
             if (std::uniform_int_distribution<int>(0, ties - 1)(gen) == 0) best = a;

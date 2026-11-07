@@ -74,6 +74,7 @@ class Skip
         int simulator_pool_size_;
 
         torch::Tensor legal_mask_; // legal shots, {1, policy size} bool
+        std::vector<int> legal_actions_; // the same shots as indices, for the search loop
 
         int kShotPerEnd_;
 
