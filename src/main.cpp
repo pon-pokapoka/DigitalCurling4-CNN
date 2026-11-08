@@ -41,11 +41,13 @@ int main(int argc, char const* argv[])
 
     std::string host, id, auth_id, auth_pw;
     int team_idx;
-    app.add_option("--host", host, "The URL of the server to connect to")->default_str("");
-    app.add_option("--id", id, "The game/competition ID")->default_str("");
-    app.add_option("--team", team_idx, "The team index (0 or 1)")->default_val(0)->check(CLI::Range(0,1))->force_callback();
-    app.add_option("--auth-id", auth_id, "The authentication ID")->default_str("user")->force_callback();
-    app.add_option("--auth-pw", auth_pw, "The authentication password")->default_str("password")->force_callback();
+    // Each option can also come from an environment variable; a command-line flag
+    // wins. DC_AUTH_PW keeps the password out of the process's command line.
+    app.add_option("--host", host, "The URL of the server to connect to")->default_str("")->envname("DC_HOST");
+    app.add_option("--id", id, "The game/competition ID")->default_str("")->envname("DC_MATCH_ID");
+    app.add_option("--team", team_idx, "The team index (0 or 1)")->default_val(0)->check(CLI::Range(0,1))->force_callback()->envname("DC_TEAM");
+    app.add_option("--auth-id", auth_id, "The authentication ID")->default_str("user")->force_callback()->envname("DC_AUTH_ID");
+    app.add_option("--auth-pw", auth_pw, "The authentication password")->default_str("password")->force_callback()->envname("DC_AUTH_PW");
 
 #ifdef DIGITALCURLING_CLIENT_USE_LOADER
     std::string plugin_dir;
