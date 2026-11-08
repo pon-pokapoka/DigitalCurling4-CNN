@@ -3,8 +3,8 @@
 # Runtime image for the CNN DigitalCurling client (Kubernetes-ready).
 #
 #   docker build -t cnn-client:latest .
-#   docker run --rm --gpus all cnn-client:latest --host http://server:5000 --id <match> --team 0 \
-#       --auth-id user --auth-pw pass
+#   docker run --rm --gpus all -e DC_AUTH_ID=user -e DC_AUTH_PW cnn-client:latest \
+#       --host http://server:5000 --id <match> --team 0
 #
 # For a server with a private CA, mount the CA certificate and set SSL_CERT_FILE:
 #   docker run ... -v "$PWD/ca.crt:/etc/dc4/ca.crt:ro" -e SSL_CERT_FILE=/etc/dc4/ca.crt ...

@@ -85,18 +85,20 @@ The model files (`src/engine/model/traced.pt`, `win_table.csv`) must be present 
 
 ```bash
 docker build -t cnn-client:latest .
-docker run --rm --gpus all cnn-client:latest \
-    --host http://server:5000 --id <match-id> --team 0 --auth-id user --auth-pw pass
+docker run --rm --gpus all -e DC_AUTH_ID=user -e DC_AUTH_PW cnn-client:latest \
+    --host http://server:5000 --id <match-id> --team 0
 ```
+
+`-e DC_AUTH_PW` without a value passes the variable from your shell, so the password isn't on the command line.
 
 The image trusts the public CAs. For a TLS server with a private CA, mount the CA's public certificate
 and point `SSL_CERT_FILE` at it. This works with a non-root user and a read-only root filesystem:
 
 ```bash
-docker run --rm --gpus all \
+docker run --rm --gpus all -e DC_AUTH_ID=user -e DC_AUTH_PW \
     -v "$PWD/ca.crt:/etc/dc4/ca.crt:ro" -e SSL_CERT_FILE=/etc/dc4/ca.crt \
     cnn-client:latest \
-    --host https://server --id <match-id> --team 0 --auth-id user --auth-pw pass
+    --host https://server --id <match-id> --team 0
 ```
 
 ```yaml
@@ -105,6 +107,10 @@ containers:
   - name: client
     image: cnn-client:latest
     args: ["--host", "http://server:5000", "--id", "$(MATCH_ID)", "--team", "0"]
+    # Credentials as environment variables from a Secret, never in args.
+    envFrom:
+      - secretRef:
+          name: cnn-client-auth   # keys DC_AUTH_ID and DC_AUTH_PW
     securityContext:
       runAsNonRoot: true
       allowPrivilegeEscalation: false
@@ -140,16 +146,18 @@ volumes:
 | `--console`, `-c` | コンソール入力を有効にして起動します。 |
 
 #### オプション
-| 引数 | 説明 | デフォルト値 |
-|------|------|--------------|
-| `--host` | 接続先ホストを指定します。 | none |
-| `--id` | 接続先のゲームIDを指定します。 | none |
-| `--team` | 接続するチームを指定します。(0または1) | 0 |
-| `--auth-id` | Basic認証のIDを指定します。 | `user` |
-| `--auth-pw` | Basic認証のパスワードを指定します。 | `password` |
-| `--plugin-dir` | プラグインのディレクトリを指定します。 | `./plugins` |
+| 引数 | 環境変数 | 説明 | デフォルト値 |
+|------|----------|------|--------------|
+| `--host` | `DC_HOST` | 接続先ホストを指定します。 | none |
+| `--id` | `DC_MATCH_ID` | 接続先のゲームIDを指定します。 | none |
+| `--team` | `DC_TEAM` | 接続するチームを指定します。(0または1) | 0 |
+| `--auth-id` | `DC_AUTH_ID` | Basic認証のIDを指定します。 | `user` |
+| `--auth-pw` | `DC_AUTH_PW` | Basic認証のパスワードを指定します。 | `password` |
+| `--plugin-dir` | | プラグインのディレクトリを指定します。 | `./plugins` |
 
 オプションは全て任意オプションですが、`--host` および `--id` はクライアントの起動に必要です。  
+各オプションは環境変数でも指定でき、両方ある場合は引数が優先されます。
+パスワードは `DC_AUTH_PW` で渡すと、プロセスの引数に現れません。  
 `--console` フラグ指定を指定した場合は、標準入力にて接続先情報を入力することができます。
 
 ## 思考エンジンの開発方法
