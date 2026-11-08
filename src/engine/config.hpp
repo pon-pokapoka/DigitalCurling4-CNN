@@ -20,9 +20,12 @@ namespace config {
 
     const int expand_threshold = nSimulation; // max value of number of simulation for each child node
 
-    // A root move must have at least min_visit visits and at least
-    // min_visit_ratio of the most-visited move's visits to be chosen.
-    const int min_visit = 100;
+    // A root move must have at least min_visit_fraction of the root's visits and
+    // at least min_visit_ratio of the most-visited move's visits to be chosen.
+    // A fraction, not a fixed count, so the rule behaves the same whatever the
+    // search budget: a fixed 100 visits left only the most-visited move eligible
+    // on short budgets, so the prior decided the move.
+    const float min_visit_fraction = 0.002;
     const float min_visit_ratio = 0.1;
 
 

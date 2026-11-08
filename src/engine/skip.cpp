@@ -1019,8 +1019,8 @@ dc::moves::Move Skip::command(dc::GameState const& game_state)
 
 
     // The highest mean win rate among well-tested moves, as dlshogi does: a move
-    // needs config::min_visit visits and min_visit_ratio of the most-visited
-    // move's visits, so a move can't win on a few lucky outcomes.
+    // needs config::min_visit_fraction of the root's visits and min_visit_ratio
+    // of the most-visited move's, so a move can't win on a few lucky outcomes.
     int pixel_id = search_policy::FinalMove(root_node->ChildVisits(), root_node->ChildSums(), legal_actions_);
     if (pixel_id < 0) {
         // Nothing was searched: play the network's favourite legal shot.

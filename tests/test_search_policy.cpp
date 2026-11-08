@@ -257,12 +257,29 @@ TEST(FinalMove, TiesGoToTheMoreVisitedMove) {
 }
 
 TEST(FinalMove, TheMostVisitedMoveAlwaysQualifies) {
-    // Fewer visits than config::min_visit: only the most-visited move counts.
+    // Visits spread so thin that no move has min_visit_fraction of the root's
+    // visits: only the most-visited move counts.
     std::vector<int> visits(kActions, 0);
     std::vector<float> sums(kActions, 0.f);
-    visits[6] = 10; sums[6] = 2.f;
-    visits[7] = 3;  sums[7] = 3.f;
-    EXPECT_EQ(sp::FinalMove(visits, sums, {6, 7}), 6);
+    for (int a = 0; a < kActions; ++a) visits[a] = 1;
+    visits[6] = 2; sums[6] = 0.f;   // most visited, 0.0
+    sums[7] = 1.f;                  // 1.0, one visit
+    EXPECT_EQ(sp::FinalMove(visits, sums, sp::LegalActions(AllLegal())), 6);
+}
+
+TEST(FinalMove, ShortBudgetStillWeighsWinRate) {
+    // About 5000 root visits spread thin, as on a short budget. A move needs
+    // 0.2% of them (10 visits), not a fixed 100, so the better-scoring move
+    // with 30 visits beats the most-visited one with 60.
+    std::vector<int> visits(kActions, 0);
+    std::vector<float> sums(kActions, 0.f);
+    std::vector<int> legal;
+    for (int a = 10; a < 10 + 982; ++a) { visits[a] = 5; sums[a] = 1.f; legal.push_back(a); }  // 0.20, too few visits
+    visits[1] = 60; sums[1] = 30.f;    // 0.50, most visited
+    visits[2] = 30; sums[2] = 21.f;    // 0.70
+    legal.push_back(1); legal.push_back(2);
+    EXPECT_EQ(sp::FinalVisitThreshold(60, 5000), 10);
+    EXPECT_EQ(sp::FinalMove(visits, sums, legal), 2);
 }
 
 TEST(FinalMove, NothingVisited) {
@@ -282,20 +299,25 @@ TEST(FinalMove, ReadsAtomicStatistics) {
 // --- FinalVisitThreshold -----------------------------------------------------
 
 TEST(FinalVisitThreshold, MostVisitedMoveAlwaysQualifies) {
-    for (int max_visits : {1, 3, config::min_visit - 1, config::min_visit, 1000, 5000}) {
-        EXPECT_LE(sp::FinalVisitThreshold(max_visits), max_visits) << max_visits;
+    for (int max_visits : {1, 3, 10, 100, 1000, 5000}) {
+        EXPECT_LE(sp::FinalVisitThreshold(max_visits, 1000000), max_visits) << max_visits;
     }
 }
 
-TEST(FinalVisitThreshold, RequiresMinVisitAndRatioOfTheBest) {
-    int const big = 100 * config::min_visit;
-    int const t = sp::FinalVisitThreshold(big);
-    EXPECT_GE(t, config::min_visit);
-    EXPECT_GE(t, static_cast<int>(std::ceil(config::min_visit_ratio * big)));
+TEST(FinalVisitThreshold, RequiresFractionOfRootAndRatioOfTheBest) {
+    int const total = 100000;
+    int const t = sp::FinalVisitThreshold(total / 10, total);
+    EXPECT_GE(t, static_cast<int>(std::ceil(config::min_visit_fraction * total)));
+    EXPECT_GE(t, static_cast<int>(std::ceil(config::min_visit_ratio * (total / 10))));
+}
+
+TEST(FinalVisitThreshold, ScalesWithTheBudget) {
+    // Same shape of search, four times the visits: four times the threshold.
+    EXPECT_EQ(sp::FinalVisitThreshold(60, 5000) * 4, sp::FinalVisitThreshold(240, 20000));
 }
 
 TEST(FinalVisitThreshold, NeverZero) {
-    EXPECT_EQ(sp::FinalVisitThreshold(0), 1);  // unvisited moves (sum / 0) never qualify
+    EXPECT_EQ(sp::FinalVisitThreshold(0, 0), 1);  // unvisited moves (sum / 0) never qualify
 }
 
 }  // namespace
