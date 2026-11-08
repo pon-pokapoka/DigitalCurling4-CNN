@@ -34,8 +34,10 @@ kubectl create secret generic cnn-client-auth-team0 \
     --from-literal=auth-id=<id> --from-literal=auth-pw=<password>
 ```
 
-The client receives the password as a command-line argument (`--auth-pw`), so it is visible
-to anyone who can read the process list inside the pod.
+The client reads its options from environment variables (`DC_HOST`, `DC_MATCH_ID`,
+`DC_TEAM`, `DC_AUTH_ID`, `DC_AUTH_PW`), so the Job passes no arguments and the password
+never appears in a process's command line. This needs an image built with that support
+(DigitalCurling4-CNN #30 or later).
 
 ## Example overlay (one team)
 
@@ -79,8 +81,13 @@ For team 1, use `nameSuffix: -team1`, `DC_TEAM: "1"`, and the team-1 Secret.
 
 ## GPU scheduling
 
-Each client requests one `nvidia.com/gpu`. To run both teams of a match (or several matches)
-on one physical GPU, enable time-slicing in the NVIDIA device plugin. Depending on the cluster,
+Each client requests one `nvidia.com/gpu`, so **a match needs at least 2 `nvidia.com/gpu`
+available**, one per team, plus 2 for each further match running at the same time. With fewer,
+the second client stays Pending and the match never starts.
+
+To get that from one physical GPU, enable time-slicing in the NVIDIA device plugin so the GPU is
+advertised as 2 or more `nvidia.com/gpu`. Both teams of a match have run on one 8 GB GPU without
+problems: the engine searches only on its own turn. Depending on the cluster,
 the overlay may also need `runtimeClassName: nvidia`, node selectors, or tolerations for GPU nodes.
 
 For a TLS server with a private CA, mount the CA certificate and set `SSL_CERT_FILE`;

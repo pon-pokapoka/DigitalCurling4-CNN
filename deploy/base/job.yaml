@@ -32,17 +32,8 @@ spec:
       containers:
         - name: client
           image: cnn-client   # replaced via `images:` in the overlay's kustomization
-          args:
-            - --host
-            - $(DC_HOST)
-            - --id
-            - $(DC_MATCH_ID)
-            - --team
-            - $(DC_TEAM)
-            - --auth-id
-            - $(DC_AUTH_ID)
-            - --auth-pw
-            - $(DC_AUTH_PW)
+          # No args: the client reads every option from these environment
+          # variables, so the password never appears in a command line.
           env:
             - name: DC_HOST
               valueFrom:
