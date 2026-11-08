@@ -48,6 +48,9 @@ RUN curl -fsSL --retry 3 -o /tmp/libtorch.zip \
     && unzip -q /tmp/libtorch.zip -d /usr/local \
     && rm /tmp/libtorch.zip /tmp/libtorch.sha256
 
+# So git over SSH to GitHub works without a prompt in a fresh container.
+COPY known_hosts /etc/ssh/ssh_known_hosts
+
 # Ubuntu (24.04+) images ship a non-root `ubuntu` user (UID 1000).
 # The devcontainer CLI remaps its UID/GID to the host user's (updateRemoteUserUID),
 # so bind-mounted files keep the right ownership.

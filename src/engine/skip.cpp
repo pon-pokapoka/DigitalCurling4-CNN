@@ -614,7 +614,8 @@ std::pair<torch::Tensor, std::vector<float>> Skip::EvaluateGameState(std::vector
         if (game_states[n].end >= game_setting_.max_end) {
             next_end = 10;
         } else {
-            next_end = 10 - game_setting_.max_end + model_input.end[n] + 1;
+            // The win table covers 10 ends: longer games start at its first column.
+            next_end = std::max(1, 10 - game_setting_.max_end + model_input.end[n] + 1);
         }
         if (game_states[n].shot % (kShotPerEnd_*2) == 0) {
             if (game_states[n].IsGameOver()) {
