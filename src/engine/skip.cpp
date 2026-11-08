@@ -14,6 +14,7 @@
 #include <chrono>
 #include <mutex>
 #include <exception>
+#include <future>
 #include <stdexcept>
 #include <numeric>
 #include <map>
@@ -662,47 +663,6 @@ std::pair<torch::Tensor, std::vector<float>> Skip::EvaluateGameState(std::vector
 }
 
 
-void Skip::EvaluateQueue()
-{       
-    int size = static_cast<int>(queue_evaluate_.size());
-    // std::cout << "Size: " << size << std::endl;
-
-    std::vector<dc::GameState> game_states;
-    // game_states.resize(size);
-
-    // #pragma omp parallel for
-    // for (auto i=0; i<size; ++i) {
-    //     // std::cout << queue_evaluate[i]->GetIndices().first << "  " << queue_evaluate[i]->GetIndices().second << std::endl;
-    //     game_states[i] = queue_evaluate[i]->GetGameState();
-    // }
-
-    for (auto i=0; i<size; ++i) {
-        // std::cout << queue_evaluate[i]->GetIndices().first << "  " << queue_evaluate[i]->GetIndices().second << "  ";
-        // std::cout << queue_evaluate[i] << std::endl;
-        game_states.push_back(queue_evaluate_[i]->GetGameState());
-    }
-
-    // std::cout << "Get Game State" << std::endl;
-
-    auto policy_value = EvaluateGameState(game_states, game_setting_);
-
-    // std::cout << "Evaluate Game State" << std::endl;
-
-    // torch::Tensor policy = torch::rand({size, policy_weight * policy_width * policy_rotation}).to(torch::kCPU);
-    // torch::Tensor value = torch::rand({size});
-
-    float const* policy_data = policy_value.first.data_ptr<float>();
-    int const policy_stride = static_cast<int>(policy_value.first.size(1));
-    for (int i=0; i<size; ++i) {
-        // std::cout << static_cast<int>(game_states[i].end) << static_cast<int>(game_states[i].shot) << std::endl;
-        queue_evaluate_[i]->SetEvaluatedResults(policy_data + i * policy_stride, policy_value.second[i]);
-        // queue_evaluate[i]->SetFilter(utility::createFilter(game_states[i], g_game_setting));
-    }
-
-    // std::cout << "Set Evaluated Results" << std::endl;
-}
-
-
 dc::moves::Move Skip::command(dc::GameState const& game_state)
 {
     // TODO AIを作る際はここを編集してください
@@ -761,6 +721,47 @@ dc::moves::Move Skip::command(dc::GameState const& game_state)
 
     // std::cout << torch::rand({policy_rotation, policy_weight, policy_width}) * filt << std::endl;
 
+    // The CPU and the GPU work at the same time: while workers search, the batch
+    // from the previous iteration is being evaluated. Its children join the tree
+    // when the results arrive, and until then their virtual loss keeps the path
+    // marked as taken.
+    struct PendingChild {
+        UctNode* parent;
+        std::pair<int, int> indices;
+        dc::GameState state;
+    };
+    std::vector<PendingChild> pending;
+    std::future<std::pair<torch::Tensor, std::vector<float>>> pending_result;
+
+    auto finish_pending = [&]() {
+        if (!pending_result.valid()) return;
+        auto policy_value = pending_result.get();
+        float const* policy_data = policy_value.first.data_ptr<float>();
+        int const policy_stride = static_cast<int>(policy_value.first.size(1));
+        for (size_t i = 0; i < pending.size(); ++i) {
+            auto const& child = pending[i];
+            updateCount(child.parent, child.indices, -1*virtual_loss);
+            child.parent->CreateChild(child.indices);
+            auto* node = child.parent->GetChild(child.indices);
+            node->SetGameState(child.state);
+            node->SetEvaluatedResults(policy_data + i * policy_stride, policy_value.second[i]);
+            queue_evaluate_.push_back(node);
+        }
+        updateNodes();
+        queue_evaluate_.clear();
+        pending.clear();
+    };
+
+    int nthreads = ResolveClientThreads();
+    if (nthreads < 1) nthreads = omp_get_max_threads();
+    // Any tensor op in a worker must stay on that worker: with ATen threads inside
+    // each OpenMP thread we'd get N^2 threads for N cores.
+    at::set_num_threads(1);
+    struct RestoreThreads {
+        int count;
+        ~RestoreThreads() { at::set_num_threads(count); }
+    } restore_threads{nthreads};
+
     int count = 0;
     auto now = std::chrono::system_clock::now();
     auto a = std::chrono::system_clock::now();
@@ -784,10 +785,6 @@ dc::moves::Move Skip::command(dc::GameState const& game_state)
 
         } else {
                 {
-                    int nthreads = ResolveClientThreads();
-                    // std::cout << "Threads: " << nthreads << std::endl;
-                    if (nthreads < 1) nthreads = omp_get_max_threads();
-
                     std::atomic<int> next_i(0);
                     // Children simulated this iteration. Only nBatchSize of them can be
                     // evaluated, so stop handing out descents once that many exist.
@@ -797,10 +794,6 @@ dc::moves::Move Skip::command(dc::GameState const& game_state)
                     std::exception_ptr search_error;
                     std::mutex search_error_mutex;
                     std::atomic<bool> search_failed(false);
-
-                    // Any tensor op in a worker must stay on that worker: with ATen threads
-                    // inside each OpenMP thread we'd get N^2 threads for N cores.
-                    at::set_num_threads(1);
 
                     #pragma omp parallel num_threads(nthreads)
                     {
@@ -823,9 +816,6 @@ dc::moves::Move Skip::command(dc::GameState const& game_state)
                         }
                     } // end parallel region
 
-                    // Restore ATen thread count for evaluation (GPU batched inference).
-                    at::set_num_threads(nthreads);
-
                     if (search_error) std::rethrow_exception(search_error);
                 }
         }
@@ -837,58 +827,30 @@ dc::moves::Move Skip::command(dc::GameState const& game_state)
         }
         
 
+        // Bring the previous batch into the tree, then queue this iteration's children.
         a = std::chrono::system_clock::now();
-        for (auto i = 0; i < nLoop; ++i) {
-            if (flag_create_child_[i]) {
-                // Undo virtual loss applied after the parallel search phase.
-                updateCount(queue_create_child_[i], queue_create_child_index_[i], -1*virtual_loss);
+        finish_pending();
+        b = std::chrono::system_clock::now();
+        if constexpr (kEnableLoopPerfLogging) {
+            std::cout << "Wait: " << std::chrono::duration_cast<std::chrono::milliseconds>(b - a).count() << " msec" << "\n";
+        }
 
-                // Link a child into the tree only if it is evaluated in this
-                // iteration. An unevaluated child would occupy its slot for good:
-                // later descents reaching it neither recurse nor back up a value.
-                if (queue_evaluate_.size() < nBatchSize) {
-                    queue_create_child_[i]->CreateChild(queue_create_child_index_[i]);
-                    queue_create_child_[i]->GetChild(queue_create_child_index_[i])->SetGameState(temp_game_states_[i]);
-                    queue_evaluate_.push_back(queue_create_child_[i]->GetChild(queue_create_child_index_[i]));
-                    // std::cout << i << ":  ";
-                    // std::cout << queue_create_child_index[i].first << "  " << queue_create_child_index[i].second << ";  ";
-                    // std::cout << queue_create_child[i]->GetChild(queue_create_child_index[i])->GetIndices().first << "  " << queue_create_child[i]->GetChild(queue_create_child_index[i])->GetIndices().second << ";  ";
-                    // std::cout << queue_create_child[i]->GetChild(queue_create_child_index[i]) << std::endl;
-                }
+        std::vector<dc::GameState> batch_states;
+        for (auto i = 0; i < nLoop; ++i) {
+            if (!flag_create_child_[i]) continue;
+            flag_create_child_[i] = false;
+            if (static_cast<int>(pending.size()) < nBatchSize) {
+                pending.push_back({queue_create_child_[i], queue_create_child_index_[i], temp_game_states_[i]});
+                batch_states.push_back(temp_game_states_[i]);
+            } else {
+                updateCount(queue_create_child_[i], queue_create_child_index_[i], -1*virtual_loss);
             }
         }
-        b = std::chrono::system_clock::now();
-        if constexpr (kEnableLoopPerfLogging) {
-            std::cout << "Expand: " << std::chrono::duration_cast<std::chrono::milliseconds>(b - a).count() << " msec" << "\n";
-        }
 
-        // for (auto ptr : queue_create_child) {
-        //     ptr.reset();
-        // }
-        #pragma omp parallel for
-        for (auto i=0; i < nLoop; ++i) {
-            flag_create_child_[i] = false;
-        }
-
-
-        a = std::chrono::system_clock::now();
-
-        count += queue_evaluate_.size();
-        EvaluateQueue();
-        b = std::chrono::system_clock::now();
-        if constexpr (kEnableLoopPerfLogging) {
-            std::cout << "Evaluate: " << std::chrono::duration_cast<std::chrono::milliseconds>(b - a).count() << " msec" << "\n";
-        }
-
-        a = std::chrono::system_clock::now();
-
-        updateNodes();
-        queue_evaluate_.clear();
-        b = std::chrono::system_clock::now();
-        if constexpr (kEnableLoopPerfLogging) {
-            std::cout << "Update: " << std::chrono::duration_cast<std::chrono::milliseconds>(b - a).count() << " msec" << "\n";
-        }
-
+        count += static_cast<int>(batch_states.size());
+        pending_result = std::async(std::launch::async, [this, states = std::move(batch_states)]() {
+            return EvaluateGameState(states, game_setting_);
+        });
 
         // torch::Tensor ucb_value;
         // torch::Tensor q = torch::where(root_node->GetChildVisitCount() > 0,
@@ -909,6 +871,8 @@ dc::moves::Move Skip::command(dc::GameState const& game_state)
 
         now = std::chrono::system_clock::now();
     }
+    finish_pending();
+
     // GPUのキャッシュをクリア
     if (device_.is_cuda()) at::accelerator::emptyCache();
 
