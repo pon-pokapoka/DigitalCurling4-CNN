@@ -107,6 +107,6 @@ LABEL org.opencontainers.image.title="CNNClient" \
       org.opencontainers.image.licenses="MIT"
 
 # Exec form: the client is PID 1 and receives SIGTERM directly from the kubelet.
-# Pass connection options as container `args:` in the Pod spec.
+# Options come from DC_* environment variables (or arguments). No default CMD:
+# with one, a Pod that sets only env would run that CMD instead of the client.
 ENTRYPOINT ["/app/build/bin/cnn-client"]
-CMD ["--help"]
