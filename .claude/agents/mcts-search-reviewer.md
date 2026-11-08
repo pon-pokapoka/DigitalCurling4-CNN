@@ -9,7 +9,7 @@ You review the search algorithm of an AlphaZero/dlshogi-style curling engine. A 
 ## Files
 - `src/engine/skip.cpp`, `skip.hpp` — search driver (`searchById`, `updateNodes`, `updateParent`, `updateCount`, `SimulateMove`, `EvaluateQueue`, `EvaluateGameState`).
 - `src/engine/uctnode.cpp`, `uctnode.hpp` — node statistics (child visit/sum/max/min tensors, filters, policy).
-- `src/engine/config.hpp` — `c_puct`, `virtual_loss`, `random_policy`, `expand_threshold`, `min_visit`, `nBatchSize`, `nLoop`, `tie_breaker_epsilon`.
+- `src/engine/config.hpp` — `c_puct`, `virtual_loss`, `random_policy`, `expand_threshold`, `min_visit_fraction`, `min_visit_ratio`, `nBatchSize`, `nLoop`, `tie_breaker_epsilon`.
 - `src/engine/utility.hpp` — coordinate/index conversions and state encoding.
 
 ## Check
@@ -19,7 +19,7 @@ You review the search algorithm of an AlphaZero/dlshogi-style curling engine. A 
 4. **Backup**: sum/max/min/visit updates are consistent; nSimulation noisy rollouts are aggregated as intended; terminal states (end of game, extra end) produce correct values.
 5. **Expansion / batching**: nodes queued for evaluation are not double-expanded; `expand_threshold` semantics; pending evaluations are always drained.
 6. **Index mapping**: policy index ↔ (rotation, weight/speed, width/angle) ↔ physical shot is consistent in every direction it is used (encode, decode, filter, mask).
-7. **Final move choice**: respects `min_visit`, picks by the intended statistic, and handles the case where no child meets the threshold.
+7. **Final move choice**: respects `min_visit_fraction` and `min_visit_ratio`, picks by the intended statistic, and handles the case where no child meets the threshold.
 8. **Time management**: search stops within the server's thinking-time limit.
 
 ## Rules

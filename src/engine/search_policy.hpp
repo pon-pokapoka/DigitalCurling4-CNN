@@ -141,26 +141,33 @@ inline int LeastVisitedLegalAction(Visits const& child_visits,
 }
 
 // Minimum visits a root move needs to be chosen as the final move: at least
-// config::min_visit and config::min_visit_ratio of the most-visited move, but
-// never more than the most-visited move has, so that move always qualifies.
-// Returns at least 1 so unvisited moves (value sum / 0) never qualify.
-inline int FinalVisitThreshold(int max_child_visits)
+// config::min_visit_fraction of the root's visits and config::min_visit_ratio of
+// the most-visited move's, but never more than the most-visited move has, so
+// that move always qualifies. Returns at least 1 so unvisited moves
+// (value sum / 0) never qualify.
+inline int FinalVisitThreshold(int max_child_visits, int total_visits)
 {
-    int const relative = static_cast<int>(std::ceil(config::min_visit_ratio * max_child_visits));
-    int const threshold = std::max(config::min_visit, relative);
+    int const of_total = static_cast<int>(std::ceil(config::min_visit_fraction * total_visits));
+    int const of_best = static_cast<int>(std::ceil(config::min_visit_ratio * max_child_visits));
+    int const threshold = std::max(of_total, of_best);
     return std::max(1, std::min(threshold, max_child_visits));
 }
 
 // The final move: the highest mean value among legal moves with at least
-// FinalVisitThreshold of the most-visited move's visits; ties go to the move
+// FinalVisitThreshold visits; ties go to the move
 // with more visits. Returns -1 if no legal move was visited.
 template <class Visits, class Sums>
 inline int FinalMove(Visits const& child_visits, Sums const& child_sums, std::vector<int> const& legal_actions)
 {
     int max_visits = 0;
-    for (int a : legal_actions) max_visits = std::max(max_visits, static_cast<int>(child_visits[a]));
+    int total_visits = 0;
+    for (int a : legal_actions) {
+        int const visits = child_visits[a];
+        max_visits = std::max(max_visits, visits);
+        total_visits += visits;
+    }
     if (max_visits == 0) return -1;
-    int const threshold = FinalVisitThreshold(max_visits);
+    int const threshold = FinalVisitThreshold(max_visits, total_visits);
 
     int best = -1;
     float best_mean = 0.f;
