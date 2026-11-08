@@ -81,6 +81,7 @@ signing key, set `DC4_SSH_AGENT=1` and `DC4_GIT_CONFIG=1` and run
 The root [`Dockerfile`](Dockerfile) is a multi-stage build. The final image is based on `nvidia/cuda:*-base`
 and contains only the binary, the libtorch shared libraries, and the model.
 It runs as a non-root user (UID 10001), and `ENTRYPOINT` is the client itself, so pass connection options via the Pod's `args:`.
+A Kustomize base that runs one client per team as a Job is in [`deploy/`](deploy/README.md).
 The model files (`src/engine/model/traced.pt`, `win_table.csv`) must be present in the build context.
 
 ```bash
