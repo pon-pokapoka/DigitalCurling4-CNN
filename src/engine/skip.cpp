@@ -1018,36 +1018,16 @@ dc::moves::Move Skip::command(dc::GameState const& game_state)
     // int pixel_id = child_indices[static_cast<int>(std::distance(values.begin(), std::max_element(values.begin(), values.end())))];
 
 
-    // 1. Calculate the mean Q-value (Winning Rate Estimate) for visited nodes.
-    // Unvisited nodes will have a value of 0, but will be filtered later by the max_q check.
-    int const visit_threshold = search_policy::FinalVisitThreshold(root_node->GetChildVisitCount().max().item<int>());
-    torch::Tensor mean_q_values = torch::where(
-        root_node->GetChildVisitCount() >= visit_threshold, 
-        root_node->GetChildSumValue() / root_node->GetChildVisitCount() + 
-        root_node->GetChildMinValue(),
-        0 // Assign a very low value (or negative infinity) to unvisited/unreliable nodes
-    );
-
-    // 2. Find the Maximum Q-Value (Q_max)
-    torch::Tensor max_q = mean_q_values.max();
-
-    // 4. Identify the Plateau: Create a mask for actions where Q-value is within epsilon of Q_max
-    torch::Tensor plateau_mask = (mean_q_values >= (max_q - tie_breaker_epsilon));
-
-    // 5. Apply Policy Tie-Breaker:
-    //    - For actions on the plateau, use their Policy Value (P) as the score.
-    //    - For actions not on the plateau, assign a very low value (or negative infinity).
-    torch::Tensor policy = root_node->GetPolicy(); // Assuming this is a tensor of P(a|s)
-    torch::Tensor tie_breaker_score = torch::where(
-        plateau_mask & legal_mask_,
-        policy,
-        0
-    );
-
-    // 6. Argmax on the Tie-Breaker Score:
-    //    - torch::topk finds the maximum score.
-    //    - .index({0, 0}).item<int>() extracts the index (pixel_id) of that maximum score.
-    int pixel_id = std::get<1>(torch::topk(tie_breaker_score, 1)).index({0, 0}).item<int>();
+    // The highest mean win rate among well-tested moves, as dlshogi does: a move
+    // needs config::min_visit visits and min_visit_ratio of the most-visited
+    // move's visits, so a move can't win on a few lucky outcomes.
+    int pixel_id = search_policy::FinalMove(root_node->ChildVisits(), root_node->ChildSums(), legal_actions_);
+    if (pixel_id < 0) {
+        // Nothing was searched: play the network's favourite legal shot.
+        auto const& prior = root_node->GetPolicyValues();
+        pixel_id = *std::max_element(legal_actions_.begin(), legal_actions_.end(),
+                                     [&](int a, int b) { return prior[a] < prior[b]; });
+    }
 
     // std::cout << pixel_id << ":   " << pixel_id / (policy_weight * policy_width) << ", " << pixel_id % (policy_weight * policy_width) / policy_width << ", " << pixel_id % (policy_weight * policy_width) % policy_width << std::endl;
 
