@@ -81,13 +81,8 @@ For team 1, use `nameSuffix: -team1`, `DC_TEAM: "1"`, and the team-1 Secret.
 
 ## GPU scheduling
 
-Each client requests one `nvidia.com/gpu`, so **a match needs at least 2 `nvidia.com/gpu`
-available**, one per team, plus 2 for each further match running at the same time. With fewer,
-the second client stays Pending and the match never starts.
-
-To get that from one physical GPU, enable time-slicing in the NVIDIA device plugin so the GPU is
-advertised as 2 or more `nvidia.com/gpu`. Both teams of a match have run on one 8 GB GPU without
-problems: the engine searches only on its own turn. Depending on the cluster,
+Each client requests one `nvidia.com/gpu`. To run both teams of a match (or several matches)
+on one physical GPU, enable time-slicing in the NVIDIA device plugin. Depending on the cluster,
 the overlay may also need `runtimeClassName: nvidia`, node selectors, or tolerations for GPU nodes.
 
 For a TLS server with a private CA, mount the CA certificate and set `SSL_CERT_FILE`;
