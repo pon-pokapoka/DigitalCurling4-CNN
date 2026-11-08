@@ -13,7 +13,7 @@ list(APPEND CMAKE_PREFIX_PATH ${LIBTORCH_DIR})
 find_package(Torch REQUIRED)
 
 # OpenMP
-find_package(OpenMP REQUIRED)
+find_package(OpenMP REQUIRED COMPONENTS CXX)
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
 
