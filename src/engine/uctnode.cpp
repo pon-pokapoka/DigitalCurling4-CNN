@@ -3,6 +3,8 @@
 
 #include "uctnode.hpp"
 
+#include <algorithm>
+
 UctNode::UctNode():
 parent_(nullptr),
 game_state_(),
@@ -14,10 +16,10 @@ visit_count_(0),
 sum_value_(0),
 child_nodes_(),
 child_node_addresses_(policy_weight*policy_width*policy_rotation),
-child_visit_count_(torch::zeros({1, policy_weight*policy_width*policy_rotation}, torch::kInt)),
-child_sum_value_(torch::zeros({1, policy_weight*policy_width*policy_rotation}, torch::kFloat)),
-child_max_value_(torch::zeros({1, policy_weight*policy_width*policy_rotation}, torch::kFloat)),
-child_min_value_(torch::ones({1, policy_weight*policy_width*policy_rotation}, torch::kFloat))
+child_visit_count_(policy_weight*policy_width*policy_rotation),
+child_sum_value_(policy_weight*policy_width*policy_rotation),
+child_max_value_(policy_weight*policy_width*policy_rotation, 0.f),
+child_min_value_(policy_weight*policy_width*policy_rotation, 1.f)
 {}
 
 void UctNode::CreateChild(std::pair<int, int> indices) {
@@ -89,7 +91,7 @@ void UctNode::SetGameState(dc::GameState game_state)
     simulated_ = true;
 }
 
-dc::GameState UctNode::GetGameState()
+dc::GameState const& UctNode::GetGameState() const
 {
     return game_state_;
 }
@@ -97,7 +99,9 @@ dc::GameState UctNode::GetGameState()
 
 void UctNode::SetPolicy(torch::Tensor policy)
 {
-    policy_ = policy;
+    auto const flat = policy.to(torch::kCPU).to(torch::kFloat).contiguous().reshape({-1});
+    float const* data = flat.data_ptr<float>();
+    policy_.assign(data, data + flat.numel());
 }
 
 
@@ -117,9 +121,9 @@ torch::Tensor UctNode::GetFilter()
     return filter_;
 }
 
-void UctNode::SetEvaluatedResults(torch::Tensor policy, float value)
+void UctNode::SetEvaluatedResults(float const* policy, float value)
 {
-    policy_ = policy;
+    policy_.assign(policy, policy + policy_weight*policy_width*policy_rotation);
     value_ = value;
     evaluated_ = true;
 }
@@ -141,6 +145,11 @@ bool UctNode::GetEvaluated()
 
 torch::Tensor UctNode::GetPolicy()
 {
+    return torch::tensor(policy_, torch::kFloat);
+}
+
+std::vector<float> const& UctNode::GetPolicyValues() const
+{
     return policy_;
 }
 
@@ -156,57 +165,75 @@ std::vector<std::vector<UctNode*>> const& UctNode::GetChildNodeAddresses() const
 
 void UctNode::SetValue(float value)
 {
-    sum_value_ += value;
+    sum_value_.fetch_add(value, std::memory_order_relaxed);
 }
 
 void UctNode::SetCount(int count)
 {
-    visit_count_ += count;
+    visit_count_.fetch_add(count, std::memory_order_relaxed);
 }
 
 float UctNode::GetCountValue()
 {
-    return sum_value_ / visit_count_;
+    return sum_value_.load(std::memory_order_relaxed) / visit_count_.load(std::memory_order_relaxed);
 }
 
 int UctNode::GetVisitCount()
 {
-    return visit_count_;
+    return visit_count_.load(std::memory_order_relaxed);
 }
 
 void UctNode::SetChildCountValue(int index, int count, float value, bool update_virtual)
 {
-    child_visit_count_.index({0, index}) += count;
-    child_sum_value_.index({0, index}) += value;
+    child_visit_count_[index].fetch_add(count, std::memory_order_relaxed);
+    child_sum_value_[index].fetch_add(value, std::memory_order_relaxed);
 
     if (!update_virtual) {
-        if (child_max_value_.index({0, index}).item<float>() < value) {
-            child_max_value_.index_put_({0, index}, value);
-        }
-        if (child_min_value_.index({0, index}).item<float>() > value) {
-            child_min_value_.index_put_({0, index}, value);
-        }
+        child_max_value_[index] = std::max(child_max_value_[index], value);
+        child_min_value_[index] = std::min(child_min_value_[index], value);
     }
 }
 
-torch::Tensor UctNode::GetChildVisitCount()
+std::vector<std::atomic<int>> const& UctNode::ChildVisits() const
 {
     return child_visit_count_;
 }
 
-torch::Tensor UctNode::GetChildSumValue()
+std::vector<std::atomic<float>> const& UctNode::ChildSums() const
 {
     return child_sum_value_;
 }
 
+namespace {
+
+// Copy per-action values into a {1, actions} tensor. Atomics convert on read.
+template <class Values, class Element>
+torch::Tensor ToTensor(Values const& values, torch::ScalarType type)
+{
+    std::vector<Element> copy(values.begin(), values.end());
+    return torch::tensor(copy, type).reshape({1, static_cast<int64_t>(copy.size())});
+}
+
+}  // namespace
+
+torch::Tensor UctNode::GetChildVisitCount()
+{
+    return ToTensor<decltype(child_visit_count_), int>(child_visit_count_, torch::kInt);
+}
+
+torch::Tensor UctNode::GetChildSumValue()
+{
+    return ToTensor<decltype(child_sum_value_), float>(child_sum_value_, torch::kFloat);
+}
+
 torch::Tensor UctNode::GetChildMaxValue()
 {
-    return child_max_value_;
+    return ToTensor<decltype(child_max_value_), float>(child_max_value_, torch::kFloat);
 }
 
 torch::Tensor UctNode::GetChildMinValue()
 {
-    return child_min_value_;
+    return ToTensor<decltype(child_min_value_), float>(child_min_value_, torch::kFloat);
 }
 
 std::pair<int, int> UctNode::GetIndices()
