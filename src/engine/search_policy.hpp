@@ -151,6 +151,33 @@ inline int FinalVisitThreshold(int max_child_visits)
     return std::max(1, std::min(threshold, max_child_visits));
 }
 
+// The final move: the highest mean value among legal moves with at least
+// FinalVisitThreshold of the most-visited move's visits; ties go to the move
+// with more visits. Returns -1 if no legal move was visited.
+template <class Visits, class Sums>
+inline int FinalMove(Visits const& child_visits, Sums const& child_sums, std::vector<int> const& legal_actions)
+{
+    int max_visits = 0;
+    for (int a : legal_actions) max_visits = std::max(max_visits, static_cast<int>(child_visits[a]));
+    if (max_visits == 0) return -1;
+    int const threshold = FinalVisitThreshold(max_visits);
+
+    int best = -1;
+    float best_mean = 0.f;
+    int best_visits = 0;
+    for (int a : legal_actions) {
+        int const visits = child_visits[a];
+        if (visits < threshold) continue;
+        float const mean = float(child_sums[a]) / visits;
+        if (best < 0 || mean > best_mean || (mean == best_mean && visits > best_visits)) {
+            best = a;
+            best_mean = mean;
+            best_visits = visits;
+        }
+    }
+    return best;
+}
+
 } // namespace digitalcurling::client::search_policy
 
 #endif // SEARCH_POLICY_HPP

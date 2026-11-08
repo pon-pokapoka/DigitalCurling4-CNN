@@ -229,6 +229,56 @@ TEST(LeastVisitedLegalAction, BreaksTiesRandomly) {
     EXPECT_GT(picks.size(), 100u);  // not always the first index
 }
 
+// --- FinalMove ---------------------------------------------------------------
+
+TEST(FinalMove, PicksTheHighestWinRateAmongWellTestedMoves) {
+    std::vector<int> visits(kActions, 0);
+    std::vector<float> sums(kActions, 0.f);
+    visits[1] = 1000; sums[1] = 600.f;   // 0.60, most visited
+    visits[2] = 400;  sums[2] = 280.f;   // 0.70, well tested
+    visits[3] = 20;   sums[3] = 19.f;    // 0.95, but too few visits
+    EXPECT_EQ(sp::FinalMove(visits, sums, {1, 2, 3}), 2);
+}
+
+TEST(FinalMove, IgnoresIllegalMoves) {
+    std::vector<int> visits(kActions, 0);
+    std::vector<float> sums(kActions, 0.f);
+    visits[1] = 500; sums[1] = 250.f;
+    visits[2] = 500; sums[2] = 450.f;   // better, but not legal
+    EXPECT_EQ(sp::FinalMove(visits, sums, {1}), 1);
+}
+
+TEST(FinalMove, TiesGoToTheMoreVisitedMove) {
+    std::vector<int> visits(kActions, 0);
+    std::vector<float> sums(kActions, 0.f);
+    visits[4] = 200; sums[4] = 100.f;
+    visits[5] = 400; sums[5] = 200.f;
+    EXPECT_EQ(sp::FinalMove(visits, sums, {4, 5}), 5);
+}
+
+TEST(FinalMove, TheMostVisitedMoveAlwaysQualifies) {
+    // Fewer visits than config::min_visit: only the most-visited move counts.
+    std::vector<int> visits(kActions, 0);
+    std::vector<float> sums(kActions, 0.f);
+    visits[6] = 10; sums[6] = 2.f;
+    visits[7] = 3;  sums[7] = 3.f;
+    EXPECT_EQ(sp::FinalMove(visits, sums, {6, 7}), 6);
+}
+
+TEST(FinalMove, NothingVisited) {
+    std::vector<int> visits(kActions, 0);
+    std::vector<float> sums(kActions, 0.f);
+    EXPECT_EQ(sp::FinalMove(visits, sums, {1, 2}), -1);
+}
+
+TEST(FinalMove, ReadsAtomicStatistics) {
+    std::vector<std::atomic<int>> visits(kActions);
+    std::vector<std::atomic<float>> sums(kActions);
+    visits[8] = 300; sums[8] = 90.f;
+    visits[9] = 300; sums[9] = 210.f;
+    EXPECT_EQ(sp::FinalMove(visits, sums, {8, 9}), 9);
+}
+
 // --- FinalVisitThreshold -----------------------------------------------------
 
 TEST(FinalVisitThreshold, MostVisitedMoveAlwaysQualifies) {

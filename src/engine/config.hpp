@@ -25,9 +25,6 @@ namespace config {
     const int min_visit = 100;
     const float min_visit_ratio = 0.1;
 
-    // Tie-Breaker Epsilon
-    const double tie_breaker_epsilon = 1e-3;
-
 
     int const policy_weight = 16;
     int const policy_width = 32;
