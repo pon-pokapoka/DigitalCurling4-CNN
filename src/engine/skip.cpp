@@ -29,7 +29,7 @@
 
 #include "readcsv.hpp"
 #include "search_policy.hpp"
-#include "executablepath.hpp"
+#include "model_identity.hpp"
 #include <sstream>
 
 namespace F = torch::nn::functional;
@@ -144,27 +144,13 @@ legal_actions_(search_policy::LegalActions(legal_mask_))
         flag_create_child_[i] = false;
     }
 
-    // Retrieve and display the executable's absolute path
-    std::filesystem::path dcRootPath;
-
-    std::string execPath = getExecutablePath();
-    if (execPath.empty()) {
-        throw std::runtime_error("cannot determine the executable path, needed to find the model files");
-    }
-
-    std::cout << "Executable Path: " << execPath << std::endl;
-
-    // If you want to work with the path, use std::filesystem
-    std::filesystem::path execFilePath(execPath);
-    std::cout << "Executable Directory: " << execFilePath.parent_path() << std::endl;
-
-    dcRootPath = execFilePath.parent_path().parent_path().parent_path();
-
     // The win table and the model are required: a failure to load either stops the client.
-    auto const modelDir = dcRootPath / "src" / "engine" / "model";
-    win_table_ = readcsv(modelDir / "win_table.csv");
+    auto const modelPath = ModelPath();
+    auto const winTablePath = WinTablePath();
+    std::cout << "Model directory: " << ModelDir() << std::endl;
+    win_table_ = readcsv(winTablePath);
     // Rows are score differences -9..9; columns are the ends completed, 0..10.
-    requireTableShape(win_table_, 19, 11, (modelDir / "win_table.csv").string());
+    requireTableShape(win_table_, 19, 11, winTablePath.string());
 
 
     torch::NoGradGuard no_grad; 
@@ -182,13 +168,18 @@ legal_actions_(search_policy::LegalActions(legal_mask_))
     try {
         // Deserialize the ScriptModule from a file using torch::jit::load().
         std::cout << "model loading..." << std::endl;
-        module_ = torch::jit::load(modelDir / "traced.pt", device_);
+        module_ = torch::jit::load(modelPath, device_);
         module_.to(dtype_);
         std::cout << "model loaded" << std::endl;
     }
     catch (const c10::Error& e) {
-        throw std::runtime_error("cannot load the model " + (modelDir / "traced.pt").string() + ": " + e.what_without_backtrace());
+        throw std::runtime_error("cannot load the model " + modelPath.string() + ": " + e.what_without_backtrace());
     }
+
+    // Record exactly which files were loaded, so results can be traced to them.
+    auto const& identity = LoadedModelIdentity();
+    std::cout << "Model: " << identity.model_file << " sha256 " << identity.model_hash << "\n"
+              << "Win table: " << identity.table_file << " sha256 " << identity.table_hash << std::endl;
 
     // ここでCNNによる推論を行うことで、次回以降の速度が早くなる
     // 使うバッチサイズすべてで行っておく

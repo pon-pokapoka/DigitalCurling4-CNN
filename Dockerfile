@@ -57,7 +57,12 @@ COPY CMakeLists.txt client_config.cmake ./
 COPY include/ include/
 COPY src/ src/
 
+# The build context has no .git, so pass the build ID in:
+#   --build-arg BUILD_ID=$(git describe --tags --dirty --always)
+# Without it the build ID is "unknown".
+ARG BUILD_ID=""
 RUN cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+        -DDIGITALCURLING_CLIENT_BUILD_ID="${BUILD_ID}" \
     && cmake --build build --parallel
 
 # Stage the runtime tree.
