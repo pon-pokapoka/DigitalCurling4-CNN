@@ -18,6 +18,8 @@
 #include <nlohmann/json.hpp>
 #include "digitalcurling/client/client_base.hpp"
 #include "digitalcurling/client/client_helpers.hpp"
+#include "build_id.hpp"
+#include "engine/model_identity.hpp"
 
 using json = nlohmann::json;
 
@@ -63,9 +65,18 @@ Team ClientBase::JoinGame(Team const& team, std::string const& auth_id, std::str
 {
     http_client_.set_basic_auth(auth_id, auth_pw);
 
+    // The short name by default, for external servers such as tournaments.
+    // DC_TEAM_NAME_FULL=1 adds the build ID and the model and table hashes, so
+    // an internal server's records show exactly which client played.
+    bool const full_name = EnvFlag("DC_TEAM_NAME_FULL");
+    std::string const team_name = ComposeTeamName(
+        GetName(), full_name, DIGITALCURLING_CLIENT_BUILD_ID,
+        full_name ? LoadedModelIdentity() : ModelIdentity{});
+    std::cout << "Team name: " << team_name << std::endl;
+
     nlohmann::json pl_json = {
         { "use_default_config", true },
-        { "team_name", GetName() }
+        { "team_name", team_name }
     };
     auto idxs = GetPlayersIndex();
 

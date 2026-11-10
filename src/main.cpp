@@ -9,6 +9,7 @@
 #include "digitalcurling/client/client_factory.hpp"
 #include "digitalcurling/client/client_base.hpp"
 #include "digitalcurling/client/i_thinking_engine.hpp"
+#include "build_id.hpp"
 
 #ifdef DIGITALCURLING_CLIENT_USE_LOADER
     #include <digitalcurling/plugins/plugin_manager.hpp>
@@ -27,7 +28,8 @@ constexpr std::string_view PROGRESS_HEADER = "Game in progress...";
 int main(int argc, char const* argv[])
 {
     /* Command line arguments */
-    const std::string app_text = "Digital Curling Client: " + std::string(CLIENT_NAME);
+    const std::string app_text = "Digital Curling Client: " + std::string(CLIENT_NAME)
+        + " (build " + DIGITALCURLING_CLIENT_BUILD_ID + ")";
 
     CLI::App app{app_text};
     app.set_version_flag("-v,--version",

@@ -18,6 +18,7 @@ resources:
 | Match ID | env `DC_MATCH_ID` (empty) | patch the env entry (required) |
 | Team | env `DC_TEAM` = `0` | patch the env entry |
 | Credentials | Secret `cnn-client-auth` (keys `auth-id`, `auth-pw`) | create in the cluster; point each team at its own Secret |
+| Team name | client name only (`CNNClient`) | env `DC_TEAM_NAME_FULL: "1"` adds the build ID and model hashes; for internal servers |
 | Search threads | `DC_CLIENT_THREADS` = CPU limit; with no limit, all node CPUs | set `resources.limits.cpu` to cap it |
 | Resources | request 1 CPU / 2 GiB; no CPU limit; 6 GiB and 1 `nvidia.com/gpu` limit | patch `resources` |
 | Timeouts | 3 h deadline, cleaned up 1 h after finishing | `activeDeadlineSeconds`, `ttlSecondsAfterFinished` |

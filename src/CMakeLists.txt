@@ -74,6 +74,21 @@ target_compile_definitions(${PROJECT_NAME}
 target_compile_definition_if_exists(${PROJECT_NAME} DIGITALCURLING_CLIENT_VERSION_MINOR PROJECT_VERSION_MINOR)
 target_compile_definition_if_exists(${PROJECT_NAME} DIGITALCURLING_CLIENT_VERSION_PATCH PROJECT_VERSION_PATCH)
 
+# Build ID: which code the client was built from (src/build_id.cmake). Set
+# DIGITALCURLING_CLIENT_BUILD_ID where there is no .git, as the Docker build does.
+set(DIGITALCURLING_CLIENT_BUILD_ID "" CACHE STRING "Build ID to embed instead of git describe (empty: use git)")
+add_custom_target(${PROJECT_NAME}_build_id
+    COMMAND ${CMAKE_COMMAND}
+        -DSOURCE_DIR=${PROJECT_SOURCE_DIR}
+        -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/build_id.hpp
+        -DBUILD_ID_OVERRIDE=${DIGITALCURLING_CLIENT_BUILD_ID}
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/build_id.cmake
+    BYPRODUCTS ${CMAKE_CURRENT_BINARY_DIR}/build_id.hpp
+    COMMENT "Updating build ID"
+    VERBATIM
+)
+add_dependencies(${PROJECT_NAME} ${PROJECT_NAME}_build_id)
+
 # dependencies
 if (OpenSSL_FOUND)
     target_include_directories(${PROJECT_NAME} PRIVATE ${OPENSSL_INCLUDE_DIR})
