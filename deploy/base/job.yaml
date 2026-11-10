@@ -1,0 +1,89 @@
+# One CNN client = one Job = one team in one match.
+# Generic base: no hosts, credentials, or cluster-specific settings.
+# Overlays set the server URL (ConfigMap), match ID and team (env),
+# the auth Secret, image tag, and GPU scheduling (runtimeClassName, tolerations).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: cnn-client
+  labels:
+    app.kubernetes.io/name: cnn-client
+    app.kubernetes.io/component: client
+spec:
+  # The client retries its own connection; this covers crashes.
+  backoffLimit: 3
+  # Upper bound for one match; overlays should tune it to the game's time limits.
+  activeDeadlineSeconds: 10800
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: cnn-client
+        app.kubernetes.io/component: client
+    spec:
+      restartPolicy: OnFailure
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: client
+          image: cnn-client   # replaced via `images:` in the overlay's kustomization
+          # No args: the client reads every option from these environment
+          # variables, so the password never appears in a command line.
+          env:
+            - name: DC_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: cnn-client
+                  key: host
+            # Set per match by the overlay or the workflow that creates the Job.
+            - name: DC_MATCH_ID
+              value: ""
+            - name: DC_TEAM
+              value: "0"
+            # Secret is not part of the base: create it in the cluster
+            # (keys: auth-id, auth-pw). Use one Secret per team.
+            - name: DC_AUTH_ID
+              valueFrom:
+                secretKeyRef:
+                  name: cnn-client-auth
+                  key: auth-id
+            - name: DC_AUTH_PW
+              valueFrom:
+                secretKeyRef:
+                  name: cnn-client-auth
+                  key: auth-pw
+            # Search threads = CPU limit. With no CPU limit (the default below) this
+            # resolves to the node's allocatable CPUs, i.e. all cores.
+            - name: DC_CLIENT_THREADS
+              valueFrom:
+                resourceFieldRef:
+                  containerName: client
+                  resource: limits.cpu
+                  divisor: "1"
+          resources:
+            # No CPU limit: the search may use every core. Scheduling uses the
+            # small request, so several clients still fit on one node.
+            # The engine only searches on its own turn, so the two clients of a
+            # match never compete for CPU; concurrent matches share it.
+            requests:
+              cpu: "1"
+              memory: 2Gi
+            limits:
+              memory: 6Gi
+              nvidia.com/gpu: 1
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}

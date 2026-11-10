@@ -1,3 +1,6 @@
+// Copyright (c) 2023-2026 Takehiro Yoshioka
+// SPDX-License-Identifier: MIT
+
 #ifndef SKIP_HPP
 #define SKIP_HPP
 
@@ -40,7 +43,6 @@ class Skip
 
         void SimulateMove(UctNode*, std::pair<int, int>, int);
         std::pair<torch::Tensor, std::vector<float>> EvaluateGameState(std::vector<dc::GameState>, dc::GameSetting);
-        void EvaluateQueue();
 
         dc::moves::Move command(const dc::GameState&);
 
@@ -70,7 +72,8 @@ class Skip
         std::array<dc::GameState, nLoop> temp_game_states_;
         int simulator_pool_size_;
 
-        torch::Tensor filt_;
+        torch::Tensor legal_mask_; // legal shots, {1, policy size} bool
+        std::vector<int> legal_actions_; // the same shots as indices, for the search loop
 
         int kShotPerEnd_;
 

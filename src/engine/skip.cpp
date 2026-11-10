@@ -1,9 +1,11 @@
+// Copyright (c) 2023-2026 Takehiro Yoshioka
+// SPDX-License-Identifier: MIT
+
 #include "skip.hpp"
 
 #include <iostream>
 #include <omp.h>
 #include <tuple>
-#include <queue>
 #include <atomic>
 #include <algorithm>
 #include <thread>
@@ -11,7 +13,9 @@
 #include <cstdlib>
 #include <chrono>
 #include <mutex>
-#include <condition_variable>
+#include <exception>
+#include <future>
+#include <stdexcept>
 #include <numeric>
 #include <map>
 #include <fstream>
@@ -20,11 +24,12 @@
 #include <torch/script.h>
 #include <torch/cuda.h>
 #include <torch/csrc/api/include/torch/nn/functional/activation.h>
-#include <c10/cuda/CUDACachingAllocator.h>
+#include <ATen/DeviceAccelerator.h>
 #include <ATen/Parallel.h>
 
 #include "readcsv.hpp"
-#include "executablepath.hpp"
+#include "search_policy.hpp"
+#include "model_identity.hpp"
 #include <sstream>
 
 namespace F = torch::nn::functional;
@@ -34,7 +39,6 @@ namespace {
 struct SearchProfile {
     std::atomic<long long> total_ns{0};
     std::atomic<long long> ucb_ns{0};
-    std::atomic<long long> topk_ns{0};
     std::atomic<long long> simulate_ns{0};
     std::atomic<long long> simulate_setup_ns{0};
     std::atomic<long long> apply_move_ns{0};
@@ -50,7 +54,6 @@ constexpr bool kEnableLoopPerfLogging = false;
 inline void ResetSearchProfile() {
     g_search_profile.total_ns.store(0, std::memory_order_relaxed);
     g_search_profile.ucb_ns.store(0, std::memory_order_relaxed);
-    g_search_profile.topk_ns.store(0, std::memory_order_relaxed);
     g_search_profile.simulate_ns.store(0, std::memory_order_relaxed);
     g_search_profile.simulate_setup_ns.store(0, std::memory_order_relaxed);
     g_search_profile.apply_move_ns.store(0, std::memory_order_relaxed);
@@ -63,7 +66,6 @@ inline void ResetSearchProfile() {
 inline void PrintSearchProfile() {
     long long total_ns = g_search_profile.total_ns.load(std::memory_order_relaxed);
     long long ucb_ns = g_search_profile.ucb_ns.load(std::memory_order_relaxed);
-    long long topk_ns = g_search_profile.topk_ns.load(std::memory_order_relaxed);
     long long simulate_ns = g_search_profile.simulate_ns.load(std::memory_order_relaxed);
     long long simulate_setup_ns = g_search_profile.simulate_setup_ns.load(std::memory_order_relaxed);
     long long apply_move_ns = g_search_profile.apply_move_ns.load(std::memory_order_relaxed);
@@ -86,7 +88,6 @@ inline void PrintSearchProfile() {
         << " recurse_calls=" << recurse_calls
         << " total=" << to_ms(total_ns) << "ms"
         << " ucb=" << to_ms(ucb_ns) << "ms(" << pct(ucb_ns) << "%)"
-        << " topk=" << to_ms(topk_ns) << "ms(" << pct(topk_ns) << "%)"
         << " sim=" << to_ms(simulate_ns) << "ms(" << pct(simulate_ns) << "%)"
         << " sim_setup=" << to_ms(simulate_setup_ns) << "ms"
         << " apply_move=" << to_ms(apply_move_ns) << "ms"
@@ -128,7 +129,9 @@ queue_create_child_(),
 queue_create_child_index_(),
 flag_create_child_(),
 temp_game_states_(),
-simulator_pool_size_(1)
+simulator_pool_size_(1),
+legal_mask_(search_policy::LegalMask()),
+legal_actions_(search_policy::LegalActions(legal_mask_))
 {
     int const client_threads = ResolveClientThreads();
     omp_set_dynamic(0);
@@ -141,24 +144,13 @@ simulator_pool_size_(1)
         flag_create_child_[i] = false;
     }
 
-    // Retrieve and display the executable's absolute path
-    std::filesystem::path dcRootPath;
-
-    std::string execPath = getExecutablePath();
-    if (execPath.empty()) {
-        std::cerr << "Failed to retrieve executable path." << std::endl;
-        dcRootPath = "../../";
-    }
-
-    std::cout << "Executable Path: " << execPath << std::endl;
-
-    // If you want to work with the path, use std::filesystem
-    std::filesystem::path execFilePath(execPath);
-    std::cout << "Executable Directory: " << execFilePath.parent_path() << std::endl;
-
-    dcRootPath = execFilePath.parent_path().parent_path().parent_path();
-
-    win_table_ = readcsv(dcRootPath / "src" / "engine" / "model" / "win_table.csv");
+    // The win table and the model are required: a failure to load either stops the client.
+    auto const modelPath = ModelPath();
+    auto const winTablePath = WinTablePath();
+    std::cout << "Model directory: " << ModelDir() << std::endl;
+    win_table_ = readcsv(winTablePath);
+    // Rows are score differences -9..9; columns are the ends completed, 0..10.
+    requireTableShape(win_table_, 19, 11, winTablePath.string());
 
 
     torch::NoGradGuard no_grad; 
@@ -176,13 +168,18 @@ simulator_pool_size_(1)
     try {
         // Deserialize the ScriptModule from a file using torch::jit::load().
         std::cout << "model loading..." << std::endl;
-        module_ = torch::jit::load(dcRootPath / "src" / "engine" / "model" / "traced.pt", device_);
+        module_ = torch::jit::load(modelPath, device_);
         module_.to(dtype_);
         std::cout << "model loaded" << std::endl;
     }
     catch (const c10::Error& e) {
-        std::cerr << "error loading the model\n";
+        throw std::runtime_error("cannot load the model " + modelPath.string() + ": " + e.what_without_backtrace());
     }
+
+    // Record exactly which files were loaded, so results can be traced to them.
+    auto const& identity = LoadedModelIdentity();
+    std::cout << "Model: " << identity.model_file << " sha256 " << identity.model_hash << "\n"
+              << "Win table: " << identity.table_file << " sha256 " << identity.table_hash << std::endl;
 
     // ここでCNNによる推論を行うことで、次回以降の速度が早くなる
     // 使うバッチサイズすべてで行っておく
@@ -206,7 +203,7 @@ simulator_pool_size_(1)
         auto outputs = module_.forward(inputs).toTuple();
         torch::Tensor out1 = outputs->elements()[0].toTensor().reshape({1, policy_weight * policy_width * policy_rotation}).to(torch::kCPU);
     }
-    c10::cuda::CUDACachingAllocator::emptyCache();
+    if (device_.is_cuda()) at::accelerator::emptyCache();
     std::cout << std::endl;
 }
 
@@ -323,29 +320,30 @@ float Skip::search(UctNode* current_node, int k)
     // filt = current_node.getFilter();
 
     if (!((current_node->GetGameState().shot == 0) && (current_node->GetParent()))) {        
-        torch::Tensor policy;
-        std::random_device rd;  // Will be used to obtain a seed for the random number engine
-        std::mt19937 gen(rd()); // Standard mersenne_twister_engine seeded with rd()
+        thread_local std::mt19937 gen(std::random_device{}());
         std::uniform_real_distribution<> dis(0.0, 1.0);
-
-        policy = current_node->GetPolicy();
 
         // std::cout << ;
         // std::cout << static_cast<int>(currencurrent_node->GetVisitCount()t_node->GetGameState().end) << "  " << static_cast<int>(current_node->GetGameState().shot) << std::endl;
 
-        torch::Tensor ucb_value;
         auto start_ucb = std::chrono::steady_clock::now();
-        
-        torch::Tensor q = torch::where(current_node->GetChildVisitCount() > 0,
-            current_node->GetChildSumValue() / current_node->GetChildVisitCount(), 0);
-        torch::Tensor u = policy * std::sqrt(torch::sum(current_node->GetChildVisitCount()).item<int>() + 1) / (1 + current_node->GetChildVisitCount());
 
-        // std::cout << torch::sum(current_node->GetChildVisitCount()).item<int>() << std::endl;
+        bool const my_turn = current_node->GetGameState().GetNextTeam() == team_;
+        bool const is_root = current_node->GetParent() == nullptr;
 
-        if (current_node->GetGameState().GetNextTeam() == team_) ucb_value = q + c_puct * u;
-        else ucb_value = 1 - q + c_puct * u;
+        // Root only: sometimes try the least-visited legal shot instead of the
+        // PUCT choice, so shots the CNN rates low still get evaluated. Deeper
+        // nodes use plain PUCT so random play doesn't leak into ancestor values.
+        int explore_action = -1;
+        if (is_root && dis(gen) < root_explore_rate) {
+            explore_action = search_policy::LeastVisitedLegalAction(current_node->ChildVisits(), legal_actions_, gen);
+        }
 
-        if (dis(gen) < random_policy) ucb_value = torch::rand({1, policy_weight*policy_width*policy_rotation}); // * filt.reshape({1, policy_weight*policy_width*policy_rotation});
+        int action = explore_action;
+        if (action < 0) {
+            action = search_policy::BestPuctAction(current_node->ChildVisits(), current_node->ChildSums(),
+                                                   current_node->GetPolicyValues().data(), legal_actions_, my_turn, c_puct);
+        }
         auto end_ucb = std::chrono::steady_clock::now();
         g_search_profile.ucb_ns.fetch_add(
             std::chrono::duration_cast<std::chrono::nanoseconds>(end_ucb - start_ucb).count(),
@@ -354,14 +352,6 @@ float Skip::search(UctNode* current_node, int k)
 
 
         // if (omp_get_thread_num() == 0) std::cout << torch::sum(q).item<float>() << torch::sum(policy).item<float>() << torch::sum(current_node->GetChildVisitCount()).item<int>();
-
-        auto start_topk = std::chrono::steady_clock::now();
-        auto indices = std::get<1>(torch::topk(ucb_value, 1));
-        auto end_topk = std::chrono::steady_clock::now();
-        g_search_profile.topk_ns.fetch_add(
-            std::chrono::duration_cast<std::chrono::nanoseconds>(end_topk - start_topk).count(),
-            std::memory_order_relaxed
-        );
 
         // auto child_indices = current_node->GetChildIndices();
 
@@ -388,8 +378,7 @@ float Skip::search(UctNode* current_node, int k)
         // if (omp_get_thread_num() == 0) std::cout << indices.index({0, 0}).item<int>() << "  " << std::endl;
 
 
-        int action = indices.index({0, 0}).item<int>();
-        int action_visit_count = current_node->GetChildVisitCount().index({0, action}).item<int>();
+        int action_visit_count = current_node->ChildVisits()[action];
         bool is_last_shot = (current_node->GetGameState().shot + 1) >= kShotPerEnd_ * 2;
         int sim_slot = action_visit_count % nSimulation;
 
@@ -402,7 +391,9 @@ float Skip::search(UctNode* current_node, int k)
             // }
         }
 
-        auto next_node = current_node->GetChild(std::make_pair(action, sim_slot));
+        // On the last shot every descent requests a new child, so the lookup isn't
+        // needed; it would also race with AllocateNextChildIndex resizing the vector.
+        UctNode* next_node = is_last_shot ? nullptr : current_node->GetChild(std::make_pair(action, sim_slot));
 
         // std::cout << action << "  " << sim_slot << "  " << next_node << std::endl;
 
@@ -411,6 +402,9 @@ float Skip::search(UctNode* current_node, int k)
             queue_create_child_[k] = current_node;
             queue_create_child_index_[k] = std::make_pair(action, sim_slot);
             flag_create_child_[k] = true;
+            // Before the simulation, which is most of a descent: other workers
+            // must see this path as taken for all of that time.
+            updateCount(current_node, queue_create_child_index_[k], virtual_loss);
             SimulateMove(current_node, queue_create_child_index_[k], k);
             auto end_sim = std::chrono::steady_clock::now();
             g_search_profile.sim_calls.fetch_add(1, std::memory_order_relaxed);
@@ -491,7 +485,8 @@ void Skip::updateCount(UctNode* node, std::pair<int, int> indices, int count)
 {
     node->SetCount(count);
 
-    node->SetChildCountValue(indices.first, count, 0, true);
+    bool const my_turn = node->GetGameState().GetNextTeam() == team_;
+    node->SetChildCountValue(indices.first, count, search_policy::VirtualLossValue(my_turn, count), true);
 
     if (node->GetParent()) {
         updateCount(node->GetParent(), node->GetIndices(), count);
@@ -583,7 +578,9 @@ std::pair<torch::Tensor, std::vector<float>> Skip::EvaluateGameState(std::vector
 
     int size = static_cast<int>(game_states.size());
 
-    auto policy = F::softmax(outputs->elements()[0].toTensor().reshape({size, policy_weight * policy_width * policy_rotation}).to(torch::kCPU), 1);
+    // Softmax in float on the device: bf16 on the CPU is slow and rounds close moves to ties.
+    auto policy = F::softmax(outputs->elements()[0].toTensor().to(torch::kFloat).reshape({size, policy_weight * policy_width * policy_rotation}), 1)
+                      .to(torch::kCPU).contiguous();
 
     std::vector<std::vector<float>> win_rate_array(size, std::vector<float>(kShotPerEnd_*2+1));
 
@@ -598,7 +595,9 @@ std::pair<torch::Tensor, std::vector<float>> Skip::EvaluateGameState(std::vector
     // if (size!=1) std::cout << F::softmax(outputs, 1)[0] << std::endl;
 
 
-    torch::Tensor score_prob = F::softmax(outputs->elements()[1].toTensor().to(torch::kCPU), 1);
+    torch::Tensor score_prob = F::softmax(outputs->elements()[1].toTensor().to(torch::kFloat), 1).to(torch::kCPU).contiguous();
+    float const* score_prob_data = score_prob.data_ptr<float>();
+    int const score_stride = static_cast<int>(score_prob.size(1));
     std::vector<float> win_prob(size, 0);
 
     for (auto n=0; n < size; ++n){
@@ -606,7 +605,8 @@ std::pair<torch::Tensor, std::vector<float>> Skip::EvaluateGameState(std::vector
         if (game_states[n].end >= game_setting_.max_end) {
             next_end = 10;
         } else {
-            next_end = 10 - game_setting_.max_end + model_input.end[n] + 1;
+            // The win table covers 10 ends: longer games start at its first column.
+            next_end = std::max(1, 10 - game_setting_.max_end + model_input.end[n] + 1);
         }
         if (game_states[n].shot % (kShotPerEnd_*2) == 0) {
             if (game_states[n].IsGameOver()) {
@@ -634,7 +634,7 @@ std::pair<torch::Tensor, std::vector<float>> Skip::EvaluateGameState(std::vector
             }
 
             for (auto i=0; i < kShotPerEnd_*2+1; ++i) {
-                win_prob[n] += score_prob.index({n, i}).item<float>() * win_rate_array[n][i];
+                win_prob[n] += score_prob_data[n * score_stride + i] * win_rate_array[n][i];
             }
             if (team_ != game_states[n].hammer) win_prob[n] = 1 - win_prob[n];
         }
@@ -655,49 +655,14 @@ std::pair<torch::Tensor, std::vector<float>> Skip::EvaluateGameState(std::vector
 }
 
 
-void Skip::EvaluateQueue()
-{       
-    int size = static_cast<int>(queue_evaluate_.size());
-    // std::cout << "Size: " << size << std::endl;
-
-    std::vector<dc::GameState> game_states;
-    // game_states.resize(size);
-
-    // #pragma omp parallel for
-    // for (auto i=0; i<size; ++i) {
-    //     // std::cout << queue_evaluate[i]->GetIndices().first << "  " << queue_evaluate[i]->GetIndices().second << std::endl;
-    //     game_states[i] = queue_evaluate[i]->GetGameState();
-    // }
-
-    for (auto i=0; i<size; ++i) {
-        // std::cout << queue_evaluate[i]->GetIndices().first << "  " << queue_evaluate[i]->GetIndices().second << "  ";
-        // std::cout << queue_evaluate[i] << std::endl;
-        game_states.push_back(queue_evaluate_[i]->GetGameState());
-    }
-
-    // std::cout << "Get Game State" << std::endl;
-
-    auto policy_value = EvaluateGameState(game_states, game_setting_);
-
-    // std::cout << "Evaluate Game State" << std::endl;
-
-    // torch::Tensor policy = torch::rand({size, policy_weight * policy_width * policy_rotation}).to(torch::kCPU);
-    // torch::Tensor value = torch::rand({size});
-
-    for (int i=0; i<size; ++i) {
-        // std::cout << static_cast<int>(game_states[i].end) << static_cast<int>(game_states[i].shot) << std::endl;
-        queue_evaluate_[i]->SetEvaluatedResults(policy_value.first.index({i}), policy_value.second[i]);
-        // queue_evaluate[i]->SetFilter(utility::createFilter(game_states[i], g_game_setting));
-    }
-
-    // std::cout << "Set Evaluated Results" << std::endl;
-}
-
-
 dc::moves::Move Skip::command(dc::GameState const& game_state)
 {
     // TODO AIを作る際はここを編集してください
     auto start = std::chrono::system_clock::now();
+
+    // A search that failed on the previous shot may have left these set.
+    queue_evaluate_.clear();
+    flag_create_child_.fill(false);
 
     dc::GameState current_game_state = game_state;
 
@@ -733,7 +698,7 @@ dc::moves::Move Skip::command(dc::GameState const& game_state)
     // root node
     std::unique_ptr<UctNode> root_node(new UctNode());
     root_node->SetGameState(current_game_state);
-    root_node->SetEvaluatedResults(policy_value.first.index({0}), policy_value.second[0]);
+    root_node->SetEvaluatedResults(policy_value.first.data_ptr<float>(), policy_value.second[0]);
     // root_node->SetFilter(filt);
 
     // for (auto i=0; i < policy_rotation; ++i){
@@ -747,6 +712,47 @@ dc::moves::Move Skip::command(dc::GameState const& game_state)
     // }
 
     // std::cout << torch::rand({policy_rotation, policy_weight, policy_width}) * filt << std::endl;
+
+    // The CPU and the GPU work at the same time: while workers search, the batch
+    // from the previous iteration is being evaluated. Its children join the tree
+    // when the results arrive, and until then their virtual loss keeps the path
+    // marked as taken.
+    struct PendingChild {
+        UctNode* parent;
+        std::pair<int, int> indices;
+        dc::GameState state;
+    };
+    std::vector<PendingChild> pending;
+    std::future<std::pair<torch::Tensor, std::vector<float>>> pending_result;
+
+    auto finish_pending = [&]() {
+        if (!pending_result.valid()) return;
+        auto policy_value = pending_result.get();
+        float const* policy_data = policy_value.first.data_ptr<float>();
+        int const policy_stride = static_cast<int>(policy_value.first.size(1));
+        for (size_t i = 0; i < pending.size(); ++i) {
+            auto const& child = pending[i];
+            updateCount(child.parent, child.indices, -1*virtual_loss);
+            child.parent->CreateChild(child.indices);
+            auto* node = child.parent->GetChild(child.indices);
+            node->SetGameState(child.state);
+            node->SetEvaluatedResults(policy_data + i * policy_stride, policy_value.second[i]);
+            queue_evaluate_.push_back(node);
+        }
+        updateNodes();
+        queue_evaluate_.clear();
+        pending.clear();
+    };
+
+    int nthreads = ResolveClientThreads();
+    if (nthreads < 1) nthreads = omp_get_max_threads();
+    // Any tensor op in a worker must stay on that worker: with ATen threads inside
+    // each OpenMP thread we'd get N^2 threads for N cores.
+    at::set_num_threads(1);
+    struct RestoreThreads {
+        int count;
+        ~RestoreThreads() { at::set_num_threads(count); }
+    } restore_threads{nthreads};
 
     int count = 0;
     auto now = std::chrono::system_clock::now();
@@ -771,67 +777,38 @@ dc::moves::Move Skip::command(dc::GameState const& game_state)
 
         } else {
                 {
-                    int nthreads = ResolveClientThreads();
-                    // std::cout << "Threads: " << nthreads << std::endl;
-                    if (nthreads < 2) nthreads = std::max(2, omp_get_max_threads());
-                    int updater_tid = nthreads - 1; // dedicate last thread to updates
-
-                    std::queue<std::tuple<UctNode*, std::pair<int,int>, int>> update_queue;
-                    std::mutex update_mutex;
-                    std::condition_variable update_cv;
                     std::atomic<int> next_i(0);
-                    std::atomic<int> workers_remaining(nthreads - 1);
-
-                    // Each search() call runs torch tensor ops (UCB, torch::where, etc.).
-                    // If ATen uses multiple threads inside each OpenMP worker we get N^2
-                    // threads for N cores and oversubscription kills performance.
-                    // Force ATen to single-threaded for the duration of the parallel block.
-                    at::set_num_threads(1);
+                    // Children simulated this iteration. Only nBatchSize of them can be
+                    // evaluated, so stop handing out descents once that many exist.
+                    std::atomic<int> children_created(0);
+                    // An exception must not leave the parallel region (that would
+                    // terminate the process): keep the first one and rethrow it after.
+                    std::exception_ptr search_error;
+                    std::mutex search_error_mutex;
+                    std::atomic<bool> search_failed(false);
 
                     #pragma omp parallel num_threads(nthreads)
                     {
-                        int tid = omp_get_thread_num();
-
-                        if (tid == updater_tid) {
-                            // updater thread: consume requests and call updateCount
+                        try {
                             while (true) {
-                                std::unique_lock<std::mutex> lock(update_mutex);
-                                update_cv.wait(lock, [&]{ return !update_queue.empty() || workers_remaining.load() == 0; });
-                                while (!update_queue.empty()) {
-                                    auto req = update_queue.front();
-                                    update_queue.pop();
-                                    lock.unlock();
-                                    updateCount(std::get<0>(req), std::get<1>(req), std::get<2>(req));
-                                    lock.lock();
-                                }
-                                if (workers_remaining.load() == 0 && update_queue.empty()) break;
-                            }
-                        } else {
-                            // worker threads: grab indices and run search
-                            while (true) {
+                                if (search_failed.load()) break;
+                                if (children_created.load(std::memory_order_relaxed) >= nBatchSize) break;
                                 int i = next_i.fetch_add(1);
                                 if (i >= nLoop) break;
                                 search(root_node.get(), i);
 
                                 if (flag_create_child_[i]) {
-                                    std::unique_lock<std::mutex> lock(update_mutex);
-                                    update_queue.emplace(queue_create_child_[i], queue_create_child_index_[i], virtual_loss);
-                                    lock.unlock();
-                                    update_cv.notify_one();
+                                    children_created.fetch_add(1, std::memory_order_relaxed);
                                 }
-
-                                if (std::accumulate(std::begin(flag_create_child_), std::end(flag_create_child_), 0) >= nBatchSize) continue;
                             }
-
-                            // worker finished its share; decrement remaining and notify updater if last
-                            if (workers_remaining.fetch_sub(1) == 1) {
-                                update_cv.notify_one();
-                            }
+                        } catch (...) {
+                            std::lock_guard<std::mutex> lock(search_error_mutex);
+                            if (!search_error) search_error = std::current_exception();
+                            search_failed.store(true);
                         }
                     } // end parallel region
 
-                    // Restore ATen thread count for evaluation (GPU batched inference).
-                    at::set_num_threads(nthreads);
+                    if (search_error) std::rethrow_exception(search_error);
                 }
         }
         b = std::chrono::system_clock::now();
@@ -842,57 +819,30 @@ dc::moves::Move Skip::command(dc::GameState const& game_state)
         }
         
 
+        // Bring the previous batch into the tree, then queue this iteration's children.
         a = std::chrono::system_clock::now();
+        finish_pending();
+        b = std::chrono::system_clock::now();
+        if constexpr (kEnableLoopPerfLogging) {
+            std::cout << "Wait: " << std::chrono::duration_cast<std::chrono::milliseconds>(b - a).count() << " msec" << "\n";
+        }
+
+        std::vector<dc::GameState> batch_states;
         for (auto i = 0; i < nLoop; ++i) {
-            if (flag_create_child_[i]) {
-                // std::cout << queue_create_child_index_[i].first << "  " << queue_create_child_index_[i].second << std::endl;
-                queue_create_child_[i]->CreateChild(queue_create_child_index_[i]);
-                queue_create_child_[i]->GetChild(queue_create_child_index_[i])->SetGameState(temp_game_states_[i]);
-
-                // Undo virtual loss applied after the parallel search phase.
+            if (!flag_create_child_[i]) continue;
+            flag_create_child_[i] = false;
+            if (static_cast<int>(pending.size()) < nBatchSize) {
+                pending.push_back({queue_create_child_[i], queue_create_child_index_[i], temp_game_states_[i]});
+                batch_states.push_back(temp_game_states_[i]);
+            } else {
                 updateCount(queue_create_child_[i], queue_create_child_index_[i], -1*virtual_loss);
-
-                if (queue_evaluate_.size() < nBatchSize) {
-                    queue_evaluate_.push_back(queue_create_child_[i]->GetChild(queue_create_child_index_[i]));
-                    // std::cout << i << ":  ";
-                    // std::cout << queue_create_child_index[i].first << "  " << queue_create_child_index[i].second << ";  ";
-                    // std::cout << queue_create_child[i]->GetChild(queue_create_child_index[i])->GetIndices().first << "  " << queue_create_child[i]->GetChild(queue_create_child_index[i])->GetIndices().second << ";  ";
-                    // std::cout << queue_create_child[i]->GetChild(queue_create_child_index[i]) << std::endl;
-                }
             }
         }
-        b = std::chrono::system_clock::now();
-        if constexpr (kEnableLoopPerfLogging) {
-            std::cout << "Expand: " << std::chrono::duration_cast<std::chrono::milliseconds>(b - a).count() << " msec" << "\n";
-        }
 
-        // for (auto ptr : queue_create_child) {
-        //     ptr.reset();
-        // }
-        #pragma omp parallel for
-        for (auto i=0; i < nLoop; ++i) {
-            flag_create_child_[i] = false;
-        }
-
-
-        a = std::chrono::system_clock::now();
-
-        count += queue_evaluate_.size();
-        EvaluateQueue();
-        b = std::chrono::system_clock::now();
-        if constexpr (kEnableLoopPerfLogging) {
-            std::cout << "Evaluate: " << std::chrono::duration_cast<std::chrono::milliseconds>(b - a).count() << " msec" << "\n";
-        }
-
-        a = std::chrono::system_clock::now();
-
-        updateNodes();
-        queue_evaluate_.clear();
-        b = std::chrono::system_clock::now();
-        if constexpr (kEnableLoopPerfLogging) {
-            std::cout << "Update: " << std::chrono::duration_cast<std::chrono::milliseconds>(b - a).count() << " msec" << "\n";
-        }
-
+        count += static_cast<int>(batch_states.size());
+        pending_result = std::async(std::launch::async, [this, states = std::move(batch_states)]() {
+            return EvaluateGameState(states, game_setting_);
+        });
 
         // torch::Tensor ucb_value;
         // torch::Tensor q = torch::where(root_node->GetChildVisitCount() > 0,
@@ -913,8 +863,10 @@ dc::moves::Move Skip::command(dc::GameState const& game_state)
 
         now = std::chrono::system_clock::now();
     }
+    finish_pending();
+
     // GPUのキャッシュをクリア
-    c10::cuda::CUDACachingAllocator::emptyCache();
+    if (device_.is_cuda()) at::accelerator::emptyCache();
 
     auto msec = std::chrono::duration_cast<std::chrono::milliseconds>(now - start).count();
     std::cout << count << "  " << root_node->GetVisitCount() << " simulations in " << msec << " msec" << std::endl;
@@ -1057,35 +1009,16 @@ dc::moves::Move Skip::command(dc::GameState const& game_state)
     // int pixel_id = child_indices[static_cast<int>(std::distance(values.begin(), std::max_element(values.begin(), values.end())))];
 
 
-    // 1. Calculate the mean Q-value (Winning Rate Estimate) for visited nodes.
-    // Unvisited nodes will have a value of 0, but will be filtered later by the max_q check.
-    torch::Tensor mean_q_values = torch::where(
-        root_node->GetChildVisitCount() >= min_visit, 
-        root_node->GetChildSumValue() / root_node->GetChildVisitCount() + 
-        root_node->GetChildMinValue(),
-        0 // Assign a very low value (or negative infinity) to unvisited/unreliable nodes
-    );
-
-    // 2. Find the Maximum Q-Value (Q_max)
-    torch::Tensor max_q = mean_q_values.max();
-
-    // 4. Identify the Plateau: Create a mask for actions where Q-value is within epsilon of Q_max
-    torch::Tensor plateau_mask = (mean_q_values >= (max_q - tie_breaker_epsilon));
-
-    // 5. Apply Policy Tie-Breaker:
-    //    - For actions on the plateau, use their Policy Value (P) as the score.
-    //    - For actions not on the plateau, assign a very low value (or negative infinity).
-    torch::Tensor policy = root_node->GetPolicy(); // Assuming this is a tensor of P(a|s)
-    torch::Tensor tie_breaker_score = torch::where(
-        plateau_mask,
-        policy,
-        0
-    );
-
-    // 6. Argmax on the Tie-Breaker Score:
-    //    - torch::topk finds the maximum score.
-    //    - .index({0, 0}).item<int>() extracts the index (pixel_id) of that maximum score.
-    int pixel_id = std::get<1>(torch::topk(tie_breaker_score, 1)).index({0, 0}).item<int>();
+    // The highest mean win rate among well-tested moves, as dlshogi does: a move
+    // needs config::min_visit_fraction of the root's visits and min_visit_ratio
+    // of the most-visited move's, so a move can't win on a few lucky outcomes.
+    int pixel_id = search_policy::FinalMove(root_node->ChildVisits(), root_node->ChildSums(), legal_actions_);
+    if (pixel_id < 0) {
+        // Nothing was searched: play the network's favourite legal shot.
+        auto const& prior = root_node->GetPolicyValues();
+        pixel_id = *std::max_element(legal_actions_.begin(), legal_actions_.end(),
+                                     [&](int a, int b) { return prior[a] < prior[b]; });
+    }
 
     // std::cout << pixel_id << ":   " << pixel_id / (policy_weight * policy_width) << ", " << pixel_id % (policy_weight * policy_width) / policy_width << ", " << pixel_id % (policy_weight * policy_width) % policy_width << std::endl;
 

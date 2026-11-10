@@ -1,0 +1,54 @@
+{
+    "name": "DigitalCurling4-CNN",
+    "build": {
+        "dockerfile": "Dockerfile",
+        "context": ".",
+        "args": {
+            "CUDA_VERSION": "13.4.3",
+            "UBUNTU_VERSION": "26.04",
+            "TORCH_VERSION": "2.15.0",
+            "TORCH_CUDA": "134",
+            // SHA256 of that libtorch archive: change it together with the two lines above.
+            "LIBTORCH_SHA256": "786f18f4af224e1caa2f649c8c0db6c3cc3dda98f47e6d8cd863a3c3b86859f5",
+            // Optional, off by default: set DC4_CLAUDE_CODE=1 in .devcontainer/local.env
+            // (read by dev.sh) or in the environment VS Code starts from.
+            "INSTALL_CLAUDE_CODE": "${localEnv:DC4_CLAUDE_CODE:0}"
+        }
+    },
+    "runArgs": [
+        "--gpus=all",
+        "--shm-size=1g",
+        "--name=dc4-cnn-dev"
+    ],
+    // Rootless Docker: container root == host user, so bind-mounted files keep
+    // host ownership. With rootful Docker, switch to "ubuntu" and set
+    // updateRemoteUserUID to true so the CLI remaps it to the host UID.
+    "remoteUser": "root",
+    "updateRemoteUserUID": false,
+    "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
+    "mounts": [
+        "source=dc4-cnn-ccache,target=/home/ubuntu/.cache/ccache,type=volume"
+        // Personal volumes (Claude Code, GitHub CLI, git config) and the host
+        // ssh-agent are not mounted here, so the container needs none of them.
+        // dev.sh adds them when enabled in .devcontainer/local.env (see
+        // local.env.example). VS Code forwards the ssh-agent by itself.
+    ],
+    "postCreateCommand": "cmake --fresh -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release",
+    // Trust a private CA if DC4_CA_CERT is configured (dev.sh sets it), and if you
+    // set up commit signing, warn (non-fatally) when it would fail. Silent otherwise.
+    "postStartCommand": "if [ -n \"${DC4_CA_CERT:-}\" ]; then .devcontainer/setup-ca.sh; fi; .devcontainer/setup-signing.sh --check",
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "llvm-vs-code-extensions.vscode-clangd",
+                "ms-vscode.cmake-tools",
+                "editorconfig.editorconfig"
+            ],
+            "settings": {
+                "cmake.buildDirectory": "${workspaceFolder}/build",
+                "cmake.generator": "Ninja",
+                "clangd.arguments": ["--compile-commands-dir=${workspaceFolder}/build"]
+            }
+        }
+    }
+}

@@ -1,8 +1,12 @@
+// Copyright (c) 2023-2026 Takehiro Yoshioka
+// SPDX-License-Identifier: MIT
+
 #ifndef UCTNODE_HPP
 #define UCTNODE_HPP
 
 #include <torch/script.h>
 #include <torch/cuda.h>
+#include <atomic>
 #include <vector>
 #include <mutex>
 
@@ -29,14 +33,15 @@ class UctNode
         UctNode* GetParent();
 
         void SetGameState(dc::GameState);
-        dc::GameState GetGameState();
+        dc::GameState const& GetGameState() const;
         void SetPolicy(torch::Tensor);
         void SetFilter(std::array<std::array<std::array<bool, policy_width>, policy_weight>, policy_rotation>);
         // void SetValue(float);
 
         torch::Tensor GetFilter();
 
-        void SetEvaluatedResults(torch::Tensor, float);
+        // `policy` points at policy_weight * policy_width * policy_rotation floats.
+        void SetEvaluatedResults(float const* policy, float value);
 
         void SetSimulated();
         void SetEvaluated();
@@ -44,6 +49,7 @@ class UctNode
         bool GetEvaluated();
 
         torch::Tensor GetPolicy();
+        std::vector<float> const& GetPolicyValues() const;
         float GetValue();
 
         std::vector<std::vector<UctNode*>> const& GetChildNodeAddresses() const;
@@ -56,6 +62,13 @@ class UctNode
 
         void SetChildCountValue(int, int, float, bool);
 
+        // Per-action statistics. Workers read them while the updater thread writes,
+        // so they are atomic; the visit count and the sum are read independently,
+        // which only skews a mean by a visit in flight.
+        std::vector<std::atomic<int>> const& ChildVisits() const;
+        std::vector<std::atomic<float>> const& ChildSums() const;
+
+        // Tensor copies as {1, actions}, for use once the search has stopped.
         torch::Tensor GetChildVisitCount();
         torch::Tensor GetChildSumValue();
 
@@ -71,23 +84,24 @@ class UctNode
         dc::GameState       game_state_;
         std::pair<int, int> indices_;
 
-        torch::Tensor       policy_;
+        std::vector<float>  policy_;
         torch::Tensor       filter_;
         float   value_;
 
-        int     visit_count_;
-        float   sum_value_;
+        std::atomic<int>    visit_count_;
+        std::atomic<float>  sum_value_;
 
         std::vector<Ptr>    child_nodes_;
         std::vector<std::vector<UctNode*>> child_node_addresses_;
         std::mutex          child_reserve_mutex_;
 
 
-        torch::Tensor       child_visit_count_;
-        torch::Tensor       child_sum_value_;
+        std::vector<std::atomic<int>>   child_visit_count_;
+        std::vector<std::atomic<float>> child_sum_value_;
 
-        torch::Tensor       child_max_value_;
-        torch::Tensor       child_min_value_;
+        // Written only by real backups, between search phases.
+        std::vector<float>  child_max_value_;
+        std::vector<float>  child_min_value_;
 
         bool    simulated_;
         bool    evaluated_;

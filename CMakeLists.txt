@@ -21,6 +21,12 @@ project("${DIGITALCURLING_CLIENT_NAME}_v${DIGITALCURLING_CLIENT_VERSION}"
 )
 
 # --- Build settings ---
+# Search strength depends on speed, so a plain configure must not build unoptimised.
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    message(STATUS "No build type given; using Release")
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+endif()
+
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
@@ -30,9 +36,14 @@ add_compile_options($<$<CXX_COMPILER_ID:MSVC>:/utf-8>)
 option(DIGITALCURLING_CLIENT_BUILD_STANDARD_CLIENT "Enable support for standard client" ON)
 option(DIGITALCURLING_CLIENT_BUILD_MIXED_CLIENT "Enable support for mixed client" ON)
 option(DIGITALCURLING_CLIENT_BUILD_MIXED_DOUBLES_CLIENT "Enable support for mixed doubles client" ON)
+option(DIGITALCURLING_CLIENT_BUILD_TESTS "Build unit tests (GoogleTest)" OFF)
+
+if (DIGITALCURLING_CLIENT_BUILD_TESTS)
+    enable_testing()
+endif()
 
 # --- Build external libraries ---
-set(DIGITALCURLING_CLIENT_DCLIB_VERSION "4.0.1")
+set(DIGITALCURLING_CLIENT_DCLIB_VERSION "4.0.2")
 set(DIGITALCURLING_CLIENT_CLILIB_VERSION "2.6.1")
 set(DIGITALCURLING_CLIENT_HTTPLIB_VERSION "0.29.0")
 
