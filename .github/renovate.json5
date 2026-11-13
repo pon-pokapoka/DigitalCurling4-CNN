@@ -1,16 +1,17 @@
 // Renovate: opens pull requests when a pinned version has a new release.
 // https://docs.renovatebot.com/configuration-options/
 //
-// Tracked natively: GitHub Actions (digest-pinned), the CI runner image and the
-// Dockerfile syntax image. Everything else is a plain version string, tracked
-// through a `renovate:` comment on the line above it (see customManagers).
+// Tracked natively: Dockerfile base images (tag + digest), GitHub Actions
+// (digest-pinned) and the CI runner image. Everything else is a plain version
+// string, tracked through a `renovate:` comment on the line above it (see
+// customManagers).
 //
 // Some downloads are checked against a SHA256 next to their version. Renovate
 // bumps the version only, so those PRs fail CI until the checksum is updated;
 // the PR body says how (prBodyNotes below).
 {
   $schema: "https://docs.renovatebot.com/renovate-schema.json",
-  extends: ["config:recommended", "helpers:pinGitHubActionDigests"],
+  extends: ["config:recommended", "helpers:pinGitHubActionDigests", "docker:pinDigests"],
 
   // Work is merged into development; main is not updated directly.
   baseBranchPatterns: ["development"],
@@ -43,12 +44,6 @@
 
   packageRules: [
     {
-      description: "nvidia/cuda is tracked through CUDA_VERSION (custom manager); the FROM lines only template it",
-      matchManagers: ["dockerfile", "devcontainer"],
-      matchDepNames: ["nvidia/cuda"],
-      enabled: false,
-    },
-    {
       matchManagers: ["github-actions"],
       semanticCommitType: "ci",
     },
@@ -65,9 +60,12 @@
       dependencyDashboardApproval: true,
     },
     {
+      description: "Move the devel and base CUDA images together: the runtime stage copies cuDNN/NVRTC from the devel image",
+      matchDatasources: ["docker"],
       matchDepNames: ["nvidia/cuda"],
+      groupName: "CUDA images",
       prBodyNotes: [
-        "CUDA_VERSION is set in `Dockerfile`, `.devcontainer/Dockerfile` and `.devcontainer/devcontainer.json`. libtorch (`TORCH_CUDA`) bundles its own CUDA libraries; check that the cluster's GPU driver supports the new CUDA version before deploying.",
+        "Keep every `nvidia/cuda` image on the same CUDA version. libtorch (`TORCH_CUDA`) bundles its own CUDA libraries; check that the cluster's GPU driver supports the new CUDA version before deploying. A digest-only update means NVIDIA rebuilt the same tag.",
       ],
     },
     {

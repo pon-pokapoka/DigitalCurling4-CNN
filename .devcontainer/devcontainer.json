@@ -4,9 +4,6 @@
         "dockerfile": "Dockerfile",
         "context": ".",
         "args": {
-            // renovate: datasource=docker depName=nvidia/cuda extractVersion=^(?<version>.+)-cudnn-devel-ubuntu26\.04$
-            "CUDA_VERSION": "13.4.3",
-            "UBUNTU_VERSION": "26.04",
             // renovate: datasource=pypi depName=torch
             "TORCH_VERSION": "2.15.0",
             "TORCH_CUDA": "134",

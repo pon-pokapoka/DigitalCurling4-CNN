@@ -92,6 +92,16 @@ docker run --rm --gpus all -e DC_AUTH_ID=user -e DC_AUTH_PW cnn-client:latest \
 
 `-e DC_AUTH_PW` without a value passes the variable from your shell, so the password isn't on the command line.
 
+**Security updates.** The base images are pinned by digest and updated by Renovate, but NVIDIA doesn't rebuild
+them for Ubuntu fixes, so every stage runs `apt-get upgrade`. Docker caches that step; to pick up Ubuntu fixes
+released since the last build, rebuild the runtime stage without the cache (the build stage isn't shipped):
+
+```bash
+docker build --no-cache-filter runtime --build-arg BUILD_ID="$(git describe --tags --dirty --always)" -t cnn-client:latest .
+```
+
+For the dev container, `.devcontainer/dev.sh rebuild` does the same.
+
 The image trusts the public CAs. For a TLS server with a private CA, mount the CA's public certificate
 and point `SSL_CERT_FILE` at it. This works with a non-root user and a read-only root filesystem:
 

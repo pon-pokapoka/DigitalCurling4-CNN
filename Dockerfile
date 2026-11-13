@@ -15,24 +15,27 @@
 #   runtime   : nvidia/cuda *base* image + libtorch shared libs + binary + model, non-root
 #
 # The development image lives in .devcontainer/Dockerfile.
-
-# renovate: datasource=docker depName=nvidia/cuda extractVersion=^(?<version>.+)-cudnn-devel-ubuntu26\.04$
-ARG CUDA_VERSION=13.4.3
-ARG UBUNTU_VERSION=26.04
+#
+# Security updates: every stage runs `apt-get upgrade`, because NVIDIA does not
+# rebuild its images for Ubuntu fixes. To pick up new fixes without a version
+# change, rebuild the runtime stage without the layer cache:
+#   docker build --no-cache-filter runtime ...
+#
+# Base images are pinned by digest and updated by Renovate. Keep the toolchain
+# and runtime images on the same CUDA version: the runtime stage copies cuDNN and
+# NVRTC libraries from the toolchain image.
 
 # ---------------------------------------------------------------------------
-FROM nvidia/cuda:${CUDA_VERSION}-cudnn-devel-ubuntu${UBUNTU_VERSION} AS toolchain
+FROM nvidia/cuda:13.4.3-cudnn-devel-ubuntu26.04@sha256:a34cd707296198f7bf581ab8da0a977e2d6cea912ba081cf872c6742e3ade503 AS toolchain
 
-RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get upgrade -y \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         ca-certificates \
         cmake \
         curl \
         g++ \
         git \
-        libboost-dev \
-        libboost-date-time-dev \
-        libboost-regex-dev \
-        libicu-dev \
         libssl-dev \
         ninja-build \
         unzip \
@@ -89,9 +92,14 @@ RUN set -eux; \
     cp -a /usr/local/cuda/lib64/libnvrtc-builtins.so* /out/usr/local/libtorch/lib/
 
 # ---------------------------------------------------------------------------
-FROM nvidia/cuda:${CUDA_VERSION}-base-ubuntu${UBUNTU_VERSION} AS runtime
+FROM nvidia/cuda:13.4.3-base-ubuntu26.04@sha256:e2eb43e25d404e2c48716f80afdb8989a84c4da588f5509330322842084d97b0 AS runtime
 
-RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+# The upgrade brings the base image's Ubuntu packages (glibc, zlib, ...) up to
+# date; NVIDIA's images are often weeks behind. The client's CUDA libraries come
+# from libtorch and the toolchain stage, so this doesn't change them.
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get upgrade -y \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         ca-certificates \
         libgomp1 \
         libssl3t64 \

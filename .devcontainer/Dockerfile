@@ -3,21 +3,20 @@
 # Development image for the dev container (.devcontainer/devcontainer.json).
 # The source tree is bind-mounted at runtime; nothing from the repo is copied in.
 
-# renovate: datasource=docker depName=nvidia/cuda extractVersion=^(?<version>.+)-cudnn-devel-ubuntu26\.04$
-ARG CUDA_VERSION=13.4.3
-ARG UBUNTU_VERSION=26.04
-FROM nvidia/cuda:${CUDA_VERSION}-cudnn-devel-ubuntu${UBUNTU_VERSION}
+# Same base image as the toolchain stage of the root Dockerfile (pinned by
+# digest, updated by Renovate). `apt-get upgrade` applies Ubuntu fixes released
+# since NVIDIA built it (cuDNN, cuBLAS and NCCL are held, so they stay);
+# `dev.sh rebuild` picks up new ones.
+FROM nvidia/cuda:13.4.3-cudnn-devel-ubuntu26.04@sha256:a34cd707296198f7bf581ab8da0a977e2d6cea912ba081cf872c6742e3ade503
 
-RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get upgrade -y \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         # build
         ca-certificates \
         cmake \
         g++ \
         git \
-        libboost-dev \
-        libboost-date-time-dev \
-        libboost-regex-dev \
-        libicu-dev \
         libssl-dev \
         ninja-build \
         unzip \
