@@ -1,0 +1,92 @@
+// Renovate: opens pull requests when a pinned version has a new release.
+// https://docs.renovatebot.com/configuration-options/
+//
+// Tracked natively: GitHub Actions (digest-pinned), the CI runner image and the
+// Dockerfile syntax image. Everything else is a plain version string, tracked
+// through a `renovate:` comment on the line above it (see customManagers).
+//
+// Some downloads are checked against a SHA256 next to their version. Renovate
+// bumps the version only, so those PRs fail CI until the checksum is updated;
+// the PR body says how (prBodyNotes below).
+{
+  $schema: "https://docs.renovatebot.com/renovate-schema.json",
+  extends: ["config:recommended", "helpers:pinGitHubActionDigests"],
+
+  // Work is merged into development; main is not updated directly.
+  baseBranchPatterns: ["development"],
+
+  // config:recommended skips tests/ (this preset); googletest is pinned there.
+  ignorePresets: [":ignoreModulesAndTests"],
+
+  schedule: ["* 0-5 * * 1"], // Monday morning (UTC)
+  minimumReleaseAge: "3 days",
+  semanticCommits: "enabled",
+  semanticCommitType: "build",
+
+  customManagers: [
+    {
+      customType: "regex",
+      description: "Versions annotated with a `renovate:` comment on the line above",
+      managerFilePatterns: [
+        "/(^|/)Dockerfile$/",
+        "/(^|/)CMakeLists\\.txt$/",
+        "/^\\.devcontainer/devcontainer\\.json$/",
+        "/^\\.github/workflows/[^/]+\\.ya?ml$/",
+      ],
+      // Next line forms: `ARG X=1.2.3`, `"X": "1.2.3"`, `X: v1.2.3`,
+      // `set(X "1.2.3")`, `GIT_TAG v1.2.3`.
+      matchStrings: [
+        "(?:#|//) renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)(?: versioning=(?<versioning>\\S+))?(?: extractVersion=(?<extractVersion>\\S+))?\\s*\\n[^\\n]*?[=:\\s]\\s*\"?(?<currentValue>v?\\d[^\"\\s)]*)",
+      ],
+    },
+  ],
+
+  packageRules: [
+    {
+      description: "nvidia/cuda is tracked through CUDA_VERSION (custom manager); the FROM lines only template it",
+      matchManagers: ["dockerfile", "devcontainer"],
+      matchDepNames: ["nvidia/cuda"],
+      enabled: false,
+    },
+    {
+      matchManagers: ["github-actions"],
+      semanticCommitType: "ci",
+    },
+    {
+      description: "Group minor and patch updates of GitHub Actions",
+      matchManagers: ["github-actions"],
+      matchUpdateTypes: ["minor", "patch", "digest", "pinDigest"],
+      groupName: "GitHub Actions",
+    },
+    {
+      description: "Major CUDA and libtorch updates wait for approval on the Dependency Dashboard",
+      matchDepNames: ["nvidia/cuda", "torch"],
+      matchUpdateTypes: ["major"],
+      dependencyDashboardApproval: true,
+    },
+    {
+      matchDepNames: ["nvidia/cuda"],
+      prBodyNotes: [
+        "CUDA_VERSION is set in `Dockerfile`, `.devcontainer/Dockerfile` and `.devcontainer/devcontainer.json`. libtorch (`TORCH_CUDA`) bundles its own CUDA libraries; check that the cluster's GPU driver supports the new CUDA version before deploying.",
+      ],
+    },
+    {
+      matchDepNames: ["torch"],
+      prBodyNotes: [
+        "**Update the libtorch checksums before merging** (CI fails until then):\n\n```sh\n# Dockerfile, .devcontainer/Dockerfile, .devcontainer/devcontainer.json: LIBTORCH_SHA256 (CUDA build; TORCH_CUDA=134 assumed, check the archive exists)\ncurl -fsSL 'https://download.pytorch.org/libtorch/cu134/libtorch-shared-with-deps-{{{newValue}}}%2Bcu134.zip' | sha256sum\n# .github/workflows/ci.yml: LIBTORCH_SHA256 (CPU build)\ncurl -fsSL 'https://download.pytorch.org/libtorch/cpu/libtorch-shared-with-deps-{{{newValue}}}%2Bcpu.zip' | sha256sum\n```\n\nThe model (`traced.pt`) is loaded by this libtorch; check it still loads.",
+      ],
+    },
+    {
+      matchDepNames: ["koalaman/shellcheck"],
+      prBodyNotes: [
+        "**Update `SHELLCHECK_SHA256` in `.github/workflows/ci.yml` before merging** (CI fails until then):\n\n```sh\ncurl -fsSL 'https://github.com/koalaman/shellcheck/releases/download/{{{newValue}}}/shellcheck-{{{newValue}}}.linux.x86_64.tar.xz' | sha256sum\n```",
+      ],
+    },
+    {
+      matchDepNames: ["hadolint/hadolint"],
+      prBodyNotes: [
+        "**Update `HADOLINT_SHA256` in `.github/workflows/ci.yml` before merging** (CI fails until then):\n\n```sh\ncurl -fsSL 'https://github.com/hadolint/hadolint/releases/download/{{{newValue}}}/hadolint-linux-x86_64' | sha256sum\n```",
+      ],
+    },
+  ],
+}

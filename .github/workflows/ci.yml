@@ -17,6 +17,7 @@ concurrency:
 env:
   # Keep in sync with ARG TORCH_VERSION in Dockerfile / .devcontainer/Dockerfile.
   # CI has no GPU, so it builds against the CPU libtorch of the same version.
+  # renovate: datasource=pypi depName=torch
   TORCH_VERSION: "2.15.0"
   # SHA256 of the CPU archive: change it together with TORCH_VERSION.
   LIBTORCH_SHA256: f26d7550019005bac238fec4ae316b220b006cfcca29b40d7313c50f26875f60
@@ -95,8 +96,10 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     env:
+      # renovate: datasource=github-releases depName=koalaman/shellcheck
       SHELLCHECK_VERSION: v0.11.0
       SHELLCHECK_SHA256: 8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198
+      # renovate: datasource=github-releases depName=hadolint/hadolint
       HADOLINT_VERSION: v2.15.1
       HADOLINT_SHA256: c7187db94eeeeca956519a6af171adc31453941a1e777961f6e680f697c8c507
     steps:

@@ -16,6 +16,7 @@
 #
 # The development image lives in .devcontainer/Dockerfile.
 
+# renovate: datasource=docker depName=nvidia/cuda extractVersion=^(?<version>.+)-cudnn-devel-ubuntu26\.04$
 ARG CUDA_VERSION=13.4.3
 ARG UBUNTU_VERSION=26.04
 
@@ -37,6 +38,7 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
         unzip \
     && rm -rf /var/lib/apt/lists/*
 
+# renovate: datasource=pypi depName=torch
 ARG TORCH_VERSION=2.15.0
 ARG TORCH_CUDA=134
 # SHA256 of the archive below: change it together with the two versions above,

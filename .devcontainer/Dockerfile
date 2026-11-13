@@ -3,6 +3,7 @@
 # Development image for the dev container (.devcontainer/devcontainer.json).
 # The source tree is bind-mounted at runtime; nothing from the repo is copied in.
 
+# renovate: datasource=docker depName=nvidia/cuda extractVersion=^(?<version>.+)-cudnn-devel-ubuntu26\.04$
 ARG CUDA_VERSION=13.4.3
 ARG UBUNTU_VERSION=26.04
 FROM nvidia/cuda:${CUDA_VERSION}-cudnn-devel-ubuntu${UBUNTU_VERSION}
@@ -36,6 +37,7 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
         vim \
     && rm -rf /var/lib/apt/lists/*
 
+# renovate: datasource=pypi depName=torch
 ARG TORCH_VERSION=2.15.0
 ARG TORCH_CUDA=134
 # SHA256 of the archive below: change it together with the two versions above.
