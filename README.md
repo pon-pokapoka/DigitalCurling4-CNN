@@ -77,20 +77,71 @@ Only the ccache volume is always created. To sign commits with your GitHub-regis
 signing key, set `DC4_SSH_AGENT=1` and `DC4_GIT_CONFIG=1` and run
 `.devcontainer/setup-signing.sh` once inside the container.
 
-#### Runtime image (Kubernetes)
-The root [`Dockerfile`](Dockerfile) is a multi-stage build. The final image is based on `nvidia/cuda:*-base`
-and contains only the binary, the libtorch shared libraries, and the model.
-It runs as a non-root user (UID 10001), and `ENTRYPOINT` is the client itself, so pass connection options via the Pod's `args:`.
-A Kustomize base that runs one client per team as a Job is in [`deploy/`](deploy/README.md).
-The model files (`src/engine/model/traced.pt`, `win_table.csv`) must be present in the build context.
+#### Runtime image
+The root [`Dockerfile`](Dockerfile) builds the client into a small image: `nvidia/cuda:*-base`, the libtorch
+shared libraries, the client binary and the model. It runs as a non-root user (UID 10001). `ENTRYPOINT` is the
+client itself and there is no default command, so options come from `DC_*` environment variables
+(see [オプション](#オプション)) or from arguments after the image name.
+
+**Host requirements:** an NVIDIA driver that supports the image's CUDA version (13.4), and the
+[NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/) for `--gpus`.
+Without a GPU the client still runs on the CPU (it logs `CUDA is not available.`), but searches far fewer positions per shot.
+
+**1. Put the model in the build context.** The image contains the model, and the model is not in the repository.
+Before building, `src/engine/model/` must hold:
+
+| File | Content |
+|---|---|
+| `traced.pt` | The network (TorchScript) |
+| `win_table.csv` | Win probability by score difference (19 rows, -9..9) and ends completed (11 columns, 0..10) |
+
+Symbolic links are fine, e.g. `traced.pt -> gen0-588f425c.pt` (see [Versions](#versions) for the naming); the build copies their targets.
+
+**2. Build the image and check it.**
 
 ```bash
 docker build --build-arg BUILD_ID="$(git describe --tags --dirty --always)" -t cnn-client:latest .
-docker run --rm --gpus all -e DC_AUTH_ID=user -e DC_AUTH_PW cnn-client:latest \
-    --host http://server:5000 --id <match-id> --team 0
+docker run --rm cnn-client:latest --version    # prints the build ID; needs no GPU
 ```
 
-`-e DC_AUTH_PW` without a value passes the variable from your shell, so the password isn't on the command line.
+**3. Run one client per team.** Each client connects to the server, plays one team of one match, and exits with
+status 0 when the match is over.
+
+```bash
+read -rsp 'Password: ' DC_AUTH_PW && export DC_AUTH_PW   # keeps it out of shell history and the command line
+docker run --rm --gpus all \
+    -e DC_HOST=http://server:5000 -e DC_MATCH_ID=<match-id> -e DC_TEAM=0 \
+    -e DC_AUTH_ID=<user> -e DC_AUTH_PW \
+    cnn-client:latest
+```
+
+`-e DC_AUTH_PW` without a value passes the variable from your shell. For the other team, start a second container
+with `-e DC_TEAM=1` and that team's credentials. Add `-d --name team0` to run it in the background and `docker logs -f team0` to follow it.
+
+Options that help on a shared machine:
+
+| Option | Effect |
+|---|---|
+| `--gpus '"device=1"'` | Use one specific GPU. Both teams' clients can share one GPU. |
+| `-e DC_CLIENT_THREADS=8` | Search threads. The default is every CPU of the host; `--cpus` and `--cpuset-cpus` don't change it. When two clients share a machine, give each about half the cores (and the matching `--cpuset-cpus`). |
+| `-e DC_TEAM_NAME_FULL=1` | Send the build ID and model hashes in the team name (internal servers; see [Versions](#versions)). |
+| `cnn-client:latest --debug` | Arguments after the image name are passed to the client. |
+
+**Another model without rebuilding:** mount a directory holding `traced.pt` and `win_table.csv` (symbolic links
+inside it are fine) over the built-in one. The client logs the model and win table it loaded, with their SHA-256.
+
+```bash
+docker run --rm --gpus all -v "$PWD/models/gen1:/app/src/engine/model:ro" -e DC_HOST=... ... cnn-client:latest
+```
+
+**TLS server with a private CA:** the image trusts the public CAs. Otherwise, mount the CA's public certificate and
+point `SSL_CERT_FILE` at it. This works with a non-root user and a read-only root filesystem:
+
+```bash
+docker run --rm --gpus all -v "$PWD/ca.crt:/etc/dc4/ca.crt:ro" -e SSL_CERT_FILE=/etc/dc4/ca.crt \
+    -e DC_HOST=https://server -e DC_MATCH_ID=<match-id> -e DC_TEAM=0 -e DC_AUTH_ID=<user> -e DC_AUTH_PW \
+    cnn-client:latest
+```
 
 **Security updates.** The base images are pinned by digest and updated by Renovate, but NVIDIA doesn't rebuild
 them for Ubuntu fixes, so every stage runs `apt-get upgrade`. Docker caches that step; to pick up Ubuntu fixes
@@ -102,34 +153,16 @@ docker build --no-cache-filter runtime --build-arg BUILD_ID="$(git describe --ta
 
 For the dev container, `.devcontainer/dev.sh rebuild` does the same.
 
-The image trusts the public CAs. For a TLS server with a private CA, mount the CA's public certificate
-and point `SSL_CERT_FILE` at it. This works with a non-root user and a read-only root filesystem:
+#### Kubernetes
+[`deploy/`](deploy/README.md) has a Kustomize base that runs one client per team as a Job, with options as
+environment variables and credentials from a Secret. Push the image to a registry your cluster can pull from and
+point the overlay's `images:` at it.
 
-```bash
-docker run --rm --gpus all -e DC_AUTH_ID=user -e DC_AUTH_PW \
-    -v "$PWD/ca.crt:/etc/dc4/ca.crt:ro" -e SSL_CERT_FILE=/etc/dc4/ca.crt \
-    cnn-client:latest \
-    --host https://server --id <match-id> --team 0
-```
+For a TLS server with a private CA, add the certificate to the client container in the overlay:
 
 ```yaml
-# Example Pod spec
 containers:
   - name: client
-    image: cnn-client:latest
-    args: ["--host", "http://server:5000", "--id", "$(MATCH_ID)", "--team", "0"]
-    # Credentials as environment variables from a Secret, never in args.
-    envFrom:
-      - secretRef:
-          name: cnn-client-auth   # keys DC_AUTH_ID and DC_AUTH_PW
-    securityContext:
-      runAsNonRoot: true
-      allowPrivilegeEscalation: false
-      readOnlyRootFilesystem: true
-    resources:
-      limits:
-        nvidia.com/gpu: 1
-    # Only for a TLS server with a private CA:
     env:
       - name: SSL_CERT_FILE
         value: /etc/dc4/ca.crt
@@ -165,6 +198,7 @@ volumes:
 | `--auth-id` | `DC_AUTH_ID` | Basic認証のIDを指定します。 | `user` |
 | `--auth-pw` | `DC_AUTH_PW` | Basic認証のパスワードを指定します。 | `password` |
 | `--plugin-dir` | | プラグインのディレクトリを指定します。 | `./plugins` |
+| | `DC_CLIENT_THREADS` | 探索スレッド数を指定します。 | ホストの全 CPU 数 |
 | | `DC_TEAM_NAME_FULL` | `1` で、サーバーに送るチーム名にビルドIDとモデル・勝率表のハッシュを付けます。内部サーバー向け。 | 未設定 (短い名前) |
 
 オプションは全て任意オプションですが、`--host` および `--id` はクライアントの起動に必要です。  
