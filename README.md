@@ -9,6 +9,42 @@ The CNN takes an image of sheet as input, and predicts the winning probability a
 The CNN is trained with the game statistics from World Curling Championships and Olympics.
 This program is inspired by AlphaGo Zero and dlshogi.
 
+## 動作環境と起動方法 (大会運営の方へ)
+
+Docker イメージをビルドして起動する方法を推奨します。ホストに CUDA や LibTorch を入れる必要はありません。
+
+#### 1. ダウンロード
+- ソースコード: [Releases](https://github.com/pon-pokapoka/DigitalCurling4-CNN/releases) の該当バージョンの Source code、または `git clone --branch <タグ> https://github.com/pon-pokapoka/DigitalCurling4-CNN.git`
+- モデル: 同じ Release に添付の `traced.pt` と `win_table.csv` を `src/engine/model/` に置いてください。モデルはリポジトリには含まれていません。
+
+#### 2. 動作環境
+- Linux (x86_64)
+- Docker と [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/)
+- NVIDIA GPU。ドライバは CUDA 13.4 以上に対応していること (`nvidia-smi` の「CUDA Version」が 13.4 以上)
+- ビルド時にインターネット接続 (ベースイメージ、LibTorch、依存ライブラリを取得します。合計数 GB)
+
+GPU がなくても CPU で動作しますが、探索できる局面数が大幅に減り、弱くなります。
+
+#### 3. ビルド
+```bash
+docker build -t cnn-client .
+docker run --rm cnn-client --version    # ビルドの確認 (GPU 不要)
+```
+
+#### 4. 起動
+1 チームにつき 1 つのコンテナを起動します。試合が終わるとクライアントは自動で終了します。
+
+```bash
+docker run --rm --gpus all cnn-client \
+    --host http://<サーバー>:<ポート> --id <試合ID> --team 0 \
+    --auth-id <ID> --auth-pw <パスワード>
+```
+
+- もう一方のチームは `--team 1` と、そのチームの認証情報で 2 つ目のコンテナを起動してください。
+- 2 つのクライアントを同じマシンで動かす場合は、`-e DC_CLIENT_THREADS=<CPU コア数の半分>` をそれぞれに付けてください。指定しないと、各クライアントがホストの全コアを使います。
+- 引数の代わりに環境変数でも指定できます (下記[オプション](#オプション))。パスワードを `-e DC_AUTH_PW` で渡すと、コマンドラインに現れません。
+- 詳細 (GPU の選択、別のモデルの使用、プライベート CA など) は [Runtime image](#runtime-image) を参照してください。
+
 ## 必要要件
 
 #### ツール
