@@ -87,4 +87,4 @@ on one physical GPU, enable time-slicing in the NVIDIA device plugin. Depending 
 the overlay may also need `runtimeClassName: nvidia`, node selectors, or tolerations for GPU nodes.
 
 For a TLS server with a private CA, mount the CA certificate and set `SSL_CERT_FILE`;
-see [the main README](../README.md#runtime-image-kubernetes).
+see [the main README](../README.md#kubernetes).
