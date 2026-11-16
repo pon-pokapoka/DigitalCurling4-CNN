@@ -9,80 +9,155 @@ The CNN takes an image of sheet as input, and predicts the winning probability a
 The CNN is trained with the game statistics from World Curling Championships and Olympics.
 This program is inspired by AlphaGo Zero and dlshogi.
 
-## 動作環境と起動方法 (大会運営の方へ)
+## Running the client
 
-Docker イメージをビルドして起動する方法を推奨します。ホストに CUDA や LibTorch を入れる必要はありません。
+The recommended way to run the client is to build the Docker image and start one container per team.
+The host needs no CUDA or LibTorch installation.
 
-#### 1. ダウンロード
-- ソースコード: [Releases](https://github.com/pon-pokapoka/DigitalCurling4-CNN/releases) の該当バージョンの Source code、または `git clone --branch <タグ> https://github.com/pon-pokapoka/DigitalCurling4-CNN.git`
-- モデル: 同じ Release に添付の `traced.pt` と `win_table.csv` を `src/engine/model/` に置いてください。モデルはリポジトリには含まれていません。
-
-#### 2. 動作環境
+#### Requirements
 - Linux (x86_64)
-- Docker と [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/)
-- NVIDIA GPU。ドライバは CUDA 13.4 以上に対応していること (`nvidia-smi` の「CUDA Version」が 13.4 以上)
-- ビルド時にインターネット接続 (ベースイメージ、LibTorch、依存ライブラリを取得します。合計数 GB)
+- Docker and the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/)
+- An NVIDIA GPU with a driver that supports CUDA 13.4 or later (`nvidia-smi` shows "CUDA Version" 13.4 or higher)
+- Internet access while building: the base image, LibTorch and the libraries add up to several GB
 
-GPU がなくても CPU で動作しますが、探索できる局面数が大幅に減り、弱くなります。
+Without a GPU the client runs on the CPU (it logs `CUDA is not available.`), but it searches far fewer
+positions per shot and plays much weaker.
 
-#### 3. ビルド
+#### 1. Download
+- **Source:** the "Source code" archive of the version on the [Releases](https://github.com/pon-pokapoka/DigitalCurling4-CNN/releases) page,
+  or `git clone --branch <tag> https://github.com/pon-pokapoka/DigitalCurling4-CNN.git`.
+- **Model:** `traced.pt` and `win_table.csv`, attached to the same Release. They are not in the repository.
+
+Put the model files into `src/engine/model/`. The source archive doesn't contain that directory, so create it:
+
+```bash
+cd DigitalCurling4-CNN
+mkdir -p src/engine/model
+cp /path/to/traced.pt /path/to/win_table.csv src/engine/model/
+```
+
+#### 2. Build
 ```bash
 docker build -t cnn-client .
-docker run --rm cnn-client --version    # ビルドの確認 (GPU 不要)
+docker run --rm cnn-client --version    # check the build; needs no GPU
 ```
 
-#### 4. 起動
-1 チームにつき 1 つのコンテナを起動します。試合が終わるとクライアントは自動で終了します。
+`--version` prints the client name and its build ID. A build from a source download shows `build unknown`,
+because the download has no git history; see [Versions](#versions).
+
+#### 3. Run
+Start one container per team. The client connects to the server, plays its team's side of one match, and
+exits when the match is over.
 
 ```bash
-docker run --rm --gpus all cnn-client \
-    --host http://<サーバー>:<ポート> --id <試合ID> --team 0 \
-    --auth-id <ID> --auth-pw <パスワード>
+read -rsp 'Password: ' DC_AUTH_PW && export DC_AUTH_PW
+docker run --rm --gpus all -e DC_AUTH_PW cnn-client \
+    --host http://<server>:<port> --id <match-id> --team 0 --auth-id <id>
 ```
 
-- もう一方のチームは `--team 1` と、そのチームの認証情報で 2 つ目のコンテナを起動してください。
-- 2 つのクライアントを同じマシンで動かす場合は、`-e DC_CLIENT_THREADS=<CPU コア数の半分>` をそれぞれに付けてください。指定しないと、各クライアントがホストの全コアを使います。
-- 引数の代わりに環境変数でも指定できます (下記[オプション](#オプション))。パスワードを `-e DC_AUTH_PW` で渡すと、コマンドラインに現れません。
-- 詳細 (GPU の選択、別のモデルの使用、プライベート CA など) は [Runtime image](#runtime-image) を参照してください。
+- For the other team, start a second container with `--team 1` and that team's credentials.
+- `-e DC_AUTH_PW` passes the password from your shell, so it appears neither in the shell history nor on the
+  command line. If you pass it with `--auth-pw` instead, put it in single quotes (`--auth-pw '<password>'`):
+  the shell would otherwise split a password containing characters such as `;`, `&` or `|`.
+- Docker options such as `--rm`, `--gpus` and `-e` go **before** the image name. Everything after the image
+  name is passed to the client.
+- Every option can also be given as an environment variable; see [Options](#options).
 
-## 必要要件
+#### Running both clients on one machine
+| Docker option | Effect |
+|---|---|
+| `-e DC_CLIENT_THREADS=<n>` | Search threads. The default is every CPU of the host, so two clients on one machine compete for the same cores; give each about half. `--cpus` and `--cpuset-cpus` don't change the default. |
+| `--gpus '"device=1"'` | Use one specific GPU. Both clients can also share one GPU. |
+| `-d --name team0` | Run in the background; follow the log with `docker logs -f team0`. |
 
-#### ツール
-- C++17 対応のコンパイラ (GCC, Clang, MSVC, etc.)
+#### TLS server with a private CA
+The image trusts the public certificate authorities. For a server whose certificate is signed by a private CA,
+mount the CA's public certificate and point `SSL_CERT_FILE` at it:
+
+```bash
+docker run --rm --gpus all -e DC_AUTH_PW \
+    -v /path/to/ca.crt:/etc/dc4/ca.crt:ro -e SSL_CERT_FILE=/etc/dc4/ca.crt \
+    cnn-client --host https://<server> --id <match-id> --team 0 --auth-id <id>
+```
+
+#### Another model without rebuilding
+Mount a directory holding `traced.pt` and `win_table.csv` over the built-in one (symbolic links inside it are fine):
+
+```bash
+docker run --rm --gpus all -e DC_AUTH_PW -v /path/to/model-dir:/app/src/engine/model:ro cnn-client ...
+```
+
+At start-up the client logs the model and win table it loaded, with their SHA-256.
+
+#### Troubleshooting
+| Message | Cause and fix |
+|---|---|
+| `[Error] Failed to create HTTP client for host: ...` | The client got no HTTP response from the server: wrong host or port, a host name the container can't resolve (add `--add-host <name>:<IP>`), or a TLS certificate it doesn't trust (see [TLS server with a private CA](#tls-server-with-a-private-ca)). Check the server from the host with `curl https://<server>/`. |
+| `...: command not found` after the client's output | The shell split the command line, typically at a special character in an unquoted password. Pass the password with `-e DC_AUTH_PW` or in single quotes. |
+| `CUDA is not available.` | The container sees no GPU: check `--gpus all`, the NVIDIA Container Toolkit, and the driver's CUDA version. |
+| `[Error] Host and ID must be specified.` | `--host` and `--id` (or `DC_HOST` and `DC_MATCH_ID`) are required. |
+
+## Options
+
+#### Flags
+| Argument | Description |
+|---|---|
+| `--help`, `-h` | Print the help message. |
+| `--version`, `-v` | Print the version and build ID. |
+| `--debug`, `-d` | Start in debug mode. |
+| `--console`, `-c` | Read the host and match ID from standard input when they are not given. |
+
+#### Options
+| Argument | Environment variable | Description | Default |
+|---|---|---|---|
+| `--host` | `DC_HOST` | Server URL. | none |
+| `--id` | `DC_MATCH_ID` | Match ID. | none |
+| `--team` | `DC_TEAM` | Team to play (0 or 1). | 0 |
+| `--auth-id` | `DC_AUTH_ID` | Basic authentication ID. | `user` |
+| `--auth-pw` | `DC_AUTH_PW` | Basic authentication password. | `password` |
+| `--plugin-dir` | | Directory to load plugins from. | `./plugins` |
+| | `DC_CLIENT_THREADS` | Number of search threads. | all CPUs of the host |
+| | `DC_TEAM_NAME_FULL` | `1`: add the build ID and the model and win table hashes to the team name sent to the server. For internal servers. | unset (short name) |
+
+`--host` and `--id` are required to start the client. Every option can also be set with its environment
+variable; when both are given, the argument wins. A password passed in `DC_AUTH_PW` doesn't appear in the
+process's arguments.
+
+## Building from source
+
+#### Tools
+- A C++17 compiler (GCC, Clang, MSVC, etc.)
 - Git
-- [CMake](https://cmake.org/) 3.26 以上
-- [OpenSSL](https://www.openssl.org/) (HTTPS通信を行う場合)
+- [CMake](https://cmake.org/) 3.26 or later
+- [OpenSSL](https://www.openssl.org/), for HTTPS
 
-#### 依存ライブラリ
+#### Libraries
 - LibTorch
 - CUDA
-- CuDNN
-These required libraries are provided by the container images (see [Docker / Dev Container](#docker--dev-container)).
+- cuDNN
 
-以下のライブラリは CMake によって自動的に解決されます。
-- [DigitalCurling](https://github.com/digitalcurling/DigitalCurling) 4.0 以上
+The container images provide these (see [Docker and dev container](#docker-and-dev-container)).
+CMake fetches the following libraries itself:
+- [DigitalCurling](https://github.com/digitalcurling/DigitalCurling) 4.0 or later
 - [CLI11](https://github.com/CLIUtils/CLI11)
 - [httplib](https://github.com/yhirose/cpp-httplib)
 
 > [!Important]
-> HTTPS通信を行う場合、OpenSSLが必要です。
-> OpenSSLはシステムにインストールされている必要があります。
+> HTTPS needs OpenSSL installed on the system.
 
-## ビルド
+#### Build
+```bash
+mkdir build
+cd build
+cmake -DCMAKE_BUILD_TYPE=Release ..
+cmake --build . --config Release
+```
 
-1. ビルド用ディレクトリを作成し、ビルドを実行します。
-   ```bash
-   mkdir build
-   cd build
-   cmake -DCMAKE_BUILD_TYPE=Release ..
-   cmake --build . --config Release
-   ```
-
-## Docker / Dev Container
+## Docker and dev container
 
 GPU use requires the NVIDIA driver and the NVIDIA Container Toolkit on the host.
 
-#### Development (Dev Container, CLI)
+#### Development (dev container, CLI)
 [`.devcontainer/`](.devcontainer/) defines the development image (CUDA devel + libtorch + gdb/clangd/ccache).
 Start it with the [devcontainer CLI](https://github.com/devcontainers/cli) (`npm install -g @devcontainers/cli`):
 
@@ -115,68 +190,15 @@ signing key, set `DC4_SSH_AGENT=1` and `DC4_GIT_CONFIG=1` and run
 
 #### Runtime image
 The root [`Dockerfile`](Dockerfile) builds the client into a small image: `nvidia/cuda:*-base`, the libtorch
-shared libraries, the client binary and the model. It runs as a non-root user (UID 10001). `ENTRYPOINT` is the
-client itself and there is no default command, so options come from `DC_*` environment variables
-(see [オプション](#オプション)) or from arguments after the image name.
+shared libraries, the client binary and the model. It runs as a non-root user (UID 10001) and works with a
+read-only root filesystem. `ENTRYPOINT` is the client itself and there is no default command. How to build and
+run it is in [Running the client](#running-the-client).
 
-**Host requirements:** an NVIDIA driver that supports the image's CUDA version (13.4), and the
-[NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/) for `--gpus`.
-Without a GPU the client still runs on the CPU (it logs `CUDA is not available.`), but searches far fewer positions per shot.
-
-**1. Put the model in the build context.** The image contains the model, and the model is not in the repository.
-Before building, `src/engine/model/` must hold:
-
-| File | Content |
-|---|---|
-| `traced.pt` | The network (TorchScript) |
-| `win_table.csv` | Win probability by score difference (19 rows, -9..9) and ends completed (11 columns, 0..10) |
-
-Symbolic links are fine, e.g. `traced.pt -> gen0-588f425c.pt` (see [Versions](#versions) for the naming); the build copies their targets.
-
-**2. Build the image and check it.**
+The model files may be symbolic links, e.g. `traced.pt -> gen0-588f425c.pt` (see [Versions](#versions) for the
+naming); the build copies their targets. From a git checkout, pass the build ID so the image identifies its code:
 
 ```bash
 docker build --build-arg BUILD_ID="$(git describe --tags --dirty --always)" -t cnn-client:latest .
-docker run --rm cnn-client:latest --version    # prints the build ID; needs no GPU
-```
-
-**3. Run one client per team.** Each client connects to the server, plays one team of one match, and exits with
-status 0 when the match is over.
-
-```bash
-read -rsp 'Password: ' DC_AUTH_PW && export DC_AUTH_PW   # keeps it out of shell history and the command line
-docker run --rm --gpus all \
-    -e DC_HOST=http://server:5000 -e DC_MATCH_ID=<match-id> -e DC_TEAM=0 \
-    -e DC_AUTH_ID=<user> -e DC_AUTH_PW \
-    cnn-client:latest
-```
-
-`-e DC_AUTH_PW` without a value passes the variable from your shell. For the other team, start a second container
-with `-e DC_TEAM=1` and that team's credentials. Add `-d --name team0` to run it in the background and `docker logs -f team0` to follow it.
-
-Options that help on a shared machine:
-
-| Option | Effect |
-|---|---|
-| `--gpus '"device=1"'` | Use one specific GPU. Both teams' clients can share one GPU. |
-| `-e DC_CLIENT_THREADS=8` | Search threads. The default is every CPU of the host; `--cpus` and `--cpuset-cpus` don't change it. When two clients share a machine, give each about half the cores (and the matching `--cpuset-cpus`). |
-| `-e DC_TEAM_NAME_FULL=1` | Send the build ID and model hashes in the team name (internal servers; see [Versions](#versions)). |
-| `cnn-client:latest --debug` | Arguments after the image name are passed to the client. |
-
-**Another model without rebuilding:** mount a directory holding `traced.pt` and `win_table.csv` (symbolic links
-inside it are fine) over the built-in one. The client logs the model and win table it loaded, with their SHA-256.
-
-```bash
-docker run --rm --gpus all -v "$PWD/models/gen1:/app/src/engine/model:ro" -e DC_HOST=... ... cnn-client:latest
-```
-
-**TLS server with a private CA:** the image trusts the public CAs. Otherwise, mount the CA's public certificate and
-point `SSL_CERT_FILE` at it. This works with a non-root user and a read-only root filesystem:
-
-```bash
-docker run --rm --gpus all -v "$PWD/ca.crt:/etc/dc4/ca.crt:ro" -e SSL_CERT_FILE=/etc/dc4/ca.crt \
-    -e DC_HOST=https://server -e DC_MATCH_ID=<match-id> -e DC_TEAM=0 -e DC_AUTH_ID=<user> -e DC_AUTH_PW \
-    cnn-client:latest
 ```
 
 **Security updates.** The base images are pinned by digest and updated by Renovate, but NVIDIA doesn't rebuild
@@ -212,36 +234,6 @@ volumes:
       name: server-ca   # holds the public certificate as key ca.crt
 ```
 
-## 使用方法
-
-ビルド成果物を実行することで、思考エンジンクライアントが起動します。
-以下の実行引数が使用可能です。
-
-#### フラグ
-| 引数 | 説明 |
-|------|------|
-| `--help`, `-h` | ヘルプメッセージを表示します。 |
-| `--version`, `-v` | バージョン情報を表示します。 |
-| `--debug`, `-d` | デバッグモードを有効にして起動します。 |
-| `--console`, `-c` | コンソール入力を有効にして起動します。 |
-
-#### オプション
-| 引数 | 環境変数 | 説明 | デフォルト値 |
-|------|----------|------|--------------|
-| `--host` | `DC_HOST` | 接続先ホストを指定します。 | none |
-| `--id` | `DC_MATCH_ID` | 接続先のゲームIDを指定します。 | none |
-| `--team` | `DC_TEAM` | 接続するチームを指定します。(0または1) | 0 |
-| `--auth-id` | `DC_AUTH_ID` | Basic認証のIDを指定します。 | `user` |
-| `--auth-pw` | `DC_AUTH_PW` | Basic認証のパスワードを指定します。 | `password` |
-| `--plugin-dir` | | プラグインのディレクトリを指定します。 | `./plugins` |
-| | `DC_CLIENT_THREADS` | 探索スレッド数を指定します。 | ホストの全 CPU 数 |
-| | `DC_TEAM_NAME_FULL` | `1` で、サーバーに送るチーム名にビルドIDとモデル・勝率表のハッシュを付けます。内部サーバー向け。 | 未設定 (短い名前) |
-
-オプションは全て任意オプションですが、`--host` および `--id` はクライアントの起動に必要です。  
-各オプションは環境変数でも指定でき、両方ある場合は引数が優先されます。
-パスワードは `DC_AUTH_PW` で渡すと、プロセスの引数に現れません。  
-`--console` フラグ指定を指定した場合は、標準入力にて接続先情報を入力することができます。
-
 ## Versions
 
 A client is its code, its model (`traced.pt`) and its win table (`win_table.csv`); each is identified separately.
@@ -259,23 +251,20 @@ A client is its code, its model (`traced.pt`) and its win table (`win_table.csv`
 - The team name sent to the server is the client name (`CNNClient`), as tournaments expect. With `DC_TEAM_NAME_FULL=1` it is
   `<name>-<build ID>-<model hash>-<table hash>`, e.g. `CNNClient-v2026.07-67-a604b03-588f425c-648e2603`, so an internal server's match records show exactly which client played.
 
-## 思考エンジンの開発方法
+## Developing a thinking engine
 
-思考エンジンは、[src/engine/](src/engine/) ディレクトリ内に配置。
+Thinking engines live in [src/engine/](src/engine/).
 
-#### 開発手順
+1. Create the engine class. Derive it from the interface for the rules it supports; a class may derive from
+   several to support several rules.
+   - `IStandardThinkingEngine` (standard curling)
+   - `IMixedThinkingEngine` (mixed curling)
+   - `IMixedDoublesThinkingEngine` (mixed doubles curling)
 
-1. 思考エンジンのクラスを作成します。  
-対応させるルールに応じて、以下のインターフェイスクラスを継承してください。
-複数のクラスを継承し、複数のルールに対応する思考エンジンを作成することも可能です。
-   - `IStandardThinkingEngine` (通常のカーリング用)
-   - `IMixedThinkingEngine` (ミックスカーリング用)
-   - `IMixedDoublesThinkingEngine` (ミックスダブルスカーリング用)
+1. Edit the functions in `src/client_setup.cpp` so that they return your engine class. Change the rest of the
+   code as needed.
 
-1. `src/client_setup.cpp` 内の関数を編集し、作成した思考エンジンのクラスを返すようにします。  
-その他のコードは、必要に応じて編集してください。
-
-1. ルートディレクトリの `client_config.cmake` でクライアント情報を設定します。
+1. Set the client information in `client_config.cmake` at the repository root.
 
 ## Model
 The network takes the sheet, score difference, and shot number as inputs.
@@ -294,6 +283,6 @@ This strategy is inspired by AlphaGo Zero and dlshogi.
 Takehiro Yoshioka
 - [@pon_pokapoka](https://x.com/pon_pokapoka)
 
-## ライセンス
+## License
 
 [MIT](./LICENSE)
