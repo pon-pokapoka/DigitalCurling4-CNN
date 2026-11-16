@@ -43,8 +43,11 @@ if (DIGITALCURLING_CLIENT_BUILD_TESTS)
 endif()
 
 # --- Build external libraries ---
+# renovate: datasource=github-tags depName=pon-pokapoka/DigitalCurling extractVersion=^v(?<version>.+)$
 set(DIGITALCURLING_CLIENT_DCLIB_VERSION "4.0.2")
+# renovate: datasource=github-tags depName=CLIUtils/CLI11 extractVersion=^v(?<version>.+)$
 set(DIGITALCURLING_CLIENT_CLILIB_VERSION "2.6.1")
+# renovate: datasource=github-tags depName=yhirose/cpp-httplib extractVersion=^v(?<version>.+)$
 set(DIGITALCURLING_CLIENT_HTTPLIB_VERSION "0.29.0")
 
 # Digital Curling
