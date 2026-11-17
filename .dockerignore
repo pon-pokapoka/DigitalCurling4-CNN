@@ -1,0 +1,10 @@
+# Allow-list: only what the runtime Dockerfile needs.
+**
+!CMakeLists.txt
+!client_config.cmake
+!include/
+!src/
+
+# stray FetchContent checkouts / local build output
+src/_deps/
+**/build/

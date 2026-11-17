@@ -3,6 +3,9 @@
 
 #pragma once
 
+#include <algorithm>
+#include <chrono>
+#include <cstdint>
 #include <optional>
 #include <digitalcurling/game_rule.hpp>
 #include <digitalcurling/game_setting.hpp>
@@ -23,6 +26,13 @@ struct ShotInfo {
     /// @brief ショットのパラメータ
     digitalcurling::moves::Shot shot;
 };
+
+/// @brief Convert a remaining time from the server to milliseconds.
+/// @param seconds Remaining time in seconds; negative once a team has run out of time
+/// @return The remaining time, 0 if it is negative
+inline std::chrono::milliseconds RemainingTimeFromSeconds(double seconds) {
+    return std::chrono::milliseconds(static_cast<std::int64_t>(std::max(seconds, 0.0) * 1000));
+}
 
 /// @brief 盤面をシミュレータ用のストーン配列に変換する
 /// @param stone_coordinate 変換元の盤面

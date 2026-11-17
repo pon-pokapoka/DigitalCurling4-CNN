@@ -1,3 +1,6 @@
+// Copyright (c) 2023-2026 Takehiro Yoshioka
+// SPDX-License-Identifier: MIT
+
 #ifndef CONFIG_HPP
 #define CONFIG_HPP
 
@@ -10,14 +13,20 @@ namespace config {
     const int virtual_loss = 1;
     const float c_puct = 10;
 
-    const float random_policy = 0.15; // rate of randomly selecting move instead of selecting by policy
+    // Root only: probability of trying the least-visited legal shot instead of
+    // the PUCT choice, so shots the CNN rates low still get evaluated. With about
+    // 10000 root visits per shot this covers every legal shot (~630) once.
+    const float root_explore_rate = 0.1;
 
     const int expand_threshold = nSimulation; // max value of number of simulation for each child node
 
-    const int min_visit = 4; // minimum number of visit for each child node to select move
-
-    // Tie-Breaker Epsilon
-    const double tie_breaker_epsilon = 1e-3;
+    // A root move must have at least min_visit_fraction of the root's visits and
+    // at least min_visit_ratio of the most-visited move's visits to be chosen.
+    // A fraction, not a fixed count, so the rule behaves the same whatever the
+    // search budget: a fixed 100 visits left only the most-visited move eligible
+    // on short budgets, so the prior decided the move.
+    const float min_visit_fraction = 0.002;
+    const float min_visit_ratio = 0.1;
 
 
     int const policy_weight = 16;

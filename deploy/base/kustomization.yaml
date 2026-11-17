@@ -1,0 +1,18 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - job.yaml
+
+# Server URL. Overlays replace it with `configMapGenerator: behavior: replace`.
+configMapGenerator:
+  - name: cnn-client
+    literals:
+      - host=http://dc4-server:5000
+
+# The Job uses the placeholder image `cnn-client`. Overlays point it at their
+# registry, e.g.:
+#   images:
+#     - name: cnn-client
+#       newName: registry.example/cnn-client
+#       newTag: v0.1.0

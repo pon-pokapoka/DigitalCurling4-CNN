@@ -7,6 +7,7 @@ set(DIGITALCURLING_CLIENT_VERSION "0.0")
 set(DIGITALCURLING_CLIENT_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/engine/cnn_engine.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/engine/apply_move.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/engine/model_identity.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/engine/skip.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/engine/uctnode.cpp"
 )

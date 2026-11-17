@@ -1,7 +1,12 @@
+// Copyright (c) 2023-2026 Takehiro Yoshioka
+// SPDX-License-Identifier: MIT
+
 #include "apply_move.hpp"
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cstddef>
 #include <iostream>
 #include <vector>
 
@@ -120,8 +125,11 @@ void FinalizeEnd(GameSetting const& game_setting, GameState& game_state) {
         }
     }
 
-    game_state.scores.team0[game_state.end] = score0;
-    game_state.scores.team1[game_state.end] = score1;
+    // All extra ends share the last slot. Only one team scores in an end, so a
+    // tied extra end was blank and overwriting its slot loses nothing.
+    std::size_t const score_slot = std::min<std::size_t>(game_state.end, game_state.scores.team0.size() - 1);
+    game_state.scores.team0[score_slot] = score0;
+    game_state.scores.team1[score_slot] = score1;
 
     if (score0 > 0) {
         game_state.hammer = Team::k1;
@@ -152,9 +160,10 @@ void FinalizeEnd(GameSetting const& game_setting, GameState& game_state) {
         game_state.game_result = GameResult{Team::k0, GameResult::Reason::kScore};
     } else if (total1 > total0) {
         game_state.game_result = GameResult{Team::k1, GameResult::Reason::kScore};
-    } else {
+    } else if (game_state.end >= GameState::kExtraEndMax) {
         game_state.game_result = GameResult{Team::kInvalid, GameResult::Reason::kDraw};
     }
+    // Otherwise the score is tied, so the game goes on to an extra end.
 }
 
 } // namespace
