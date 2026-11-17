@@ -1,7 +1,8 @@
 # Set your client name
 set(DIGITALCURLING_CLIENT_NAME "CNNClient")
-# Set your client version (format: major.minor.patch)
-set(DIGITALCURLING_CLIENT_VERSION "0.0")
+# Set your client version (format: major.minor.patch). Calendar version YY.MM.N,
+# changed only at a release; see "Versions" in README.md.
+set(DIGITALCURLING_CLIENT_VERSION "26.11.0")
 
 # set additional source files for the client (optional)
 set(DIGITALCURLING_CLIENT_SOURCES
