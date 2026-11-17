@@ -28,7 +28,10 @@ constexpr std::string_view PROGRESS_HEADER = "Game in progress...";
 int main(int argc, char const* argv[])
 {
     /* Command line arguments */
+    // The version identifies a release even where the build ID is "unknown"
+    // (a build from a source download has no git history).
     const std::string app_text = "Digital Curling Client: " + std::string(CLIENT_NAME)
+        + " " + DIGITALCURLING_CLIENT_VERSION_STRING
         + " (build " + DIGITALCURLING_CLIENT_BUILD_ID + ")";
 
     CLI::App app{app_text};
