@@ -39,8 +39,9 @@ docker build -t cnn-client .
 docker run --rm cnn-client --version    # check the build
 ```
 
-`--version` prints the client name and its build ID. A build from a source download shows `build unknown`,
-because the download has no git history; see [Versions](#versions).
+`--version` prints the client name, its version and its build ID, e.g. `CNNClient 26.11.0 (build v26.11.0)`.
+A build from a source download shows `build unknown`, because the download has no git history; the version
+still tells which release it is. See [Versions](#versions).
 
 #### 3. Run
 Start one container per team. The client connects to the server, plays its team's side of one match, and
@@ -236,7 +237,7 @@ A client is its code, its model (`traced.pt`) and its win table (`win_table.csv`
 
 - The year has two digits because the version parts are stored in one byte each (`digitalcurling::Version`).
 - The version in `client_config.cmake` changes only at a release. Between releases, the build ID identifies the code. A build with uncommitted changes ends in `-dirty`.
-- `--version` prints the build ID. At start-up the client logs the model and win table files it loaded and their SHA-256.
+- `--version` prints the version and the build ID. At start-up the client logs the model and win table files it loaded and their SHA-256.
 - The team name sent to the server is the client name (`CNNClient`), as tournaments expect. With `DC_TEAM_NAME_FULL=1` it is
   `<name>-<build ID>-<model hash>-<table hash>`, e.g. `CNNClient-v2026.07-67-a604b03-588f425c-648e2603`, so an internal server's match records show exactly which client played.
 
