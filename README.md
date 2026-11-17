@@ -12,16 +12,13 @@ This program is inspired by AlphaGo Zero and dlshogi.
 ## Running the client
 
 The recommended way to run the client is to build the Docker image and start one container per team.
-The host needs no CUDA or LibTorch installation.
 
 #### Requirements
-- Linux (x86_64)
 - Docker and the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/)
 - An NVIDIA GPU with a driver that supports CUDA 13.4 or later (`nvidia-smi` shows "CUDA Version" 13.4 or higher)
-- Internet access while building: the base image, LibTorch and the libraries add up to several GB
 
 Without a GPU the client runs on the CPU (it logs `CUDA is not available.`), but it searches far fewer
-positions per shot and plays much weaker.
+shots and plays much weaker.
 
 #### 1. Download
 - **Source:** the "Source code" archive of the version on the [Releases](https://github.com/pon-pokapoka/DigitalCurling4-CNN/releases) page,
@@ -39,7 +36,7 @@ cp /path/to/traced.pt /path/to/win_table.csv src/engine/model/
 #### 2. Build
 ```bash
 docker build -t cnn-client .
-docker run --rm cnn-client --version    # check the build; needs no GPU
+docker run --rm cnn-client --version    # check the build
 ```
 
 `--version` prints the client name and its build ID. A build from a source download shows `build unknown`,
@@ -50,50 +47,42 @@ Start one container per team. The client connects to the server, plays its team'
 exits when the match is over.
 
 ```bash
-read -rsp 'Password: ' DC_AUTH_PW && export DC_AUTH_PW
-docker run --rm --gpus all -e DC_AUTH_PW cnn-client \
-    --host http://<server>:<port> --id <match-id> --team 0 --auth-id <id>
+docker run --rm --gpus all cnn-client \
+    --host http://<server>:<port> --id <match-id> --team <0 or 1> \
+    --auth-id <id> --auth-pw '<password>'
 ```
 
-- For the other team, start a second container with `--team 1` and that team's credentials.
-- `-e DC_AUTH_PW` passes the password from your shell, so it appears neither in the shell history nor on the
-  command line. If you pass it with `--auth-pw` instead, put it in single quotes (`--auth-pw '<password>'`):
-  the shell would otherwise split a password containing characters such as `;`, `&` or `|`.
-- Docker options such as `--rm`, `--gpus` and `-e` go **before** the image name. Everything after the image
-  name is passed to the client.
-- Every option can also be given as an environment variable; see [Options](#options).
+- Keep the password in single quotes: the shell would otherwise split a password containing characters such as `;`, `&` or `|`.
 
-#### Running both clients on one machine
-| Docker option | Effect |
-|---|---|
-| `-e DC_CLIENT_THREADS=<n>` | Search threads. The default is every CPU of the host, so two clients on one machine compete for the same cores; give each about half. `--cpus` and `--cpuset-cpus` don't change the default. |
-| `--gpus '"device=1"'` | Use one specific GPU. Both clients can also share one GPU. |
-| `-d --name team0` | Run in the background; follow the log with `docker logs -f team0`. |
+#### Options as environment variables
+Every option can also be given as an environment variable (see [Options](#options)). Passing the password this
+way keeps it out of the shell history and the process's command line:
+
+```bash
+read -rsp 'Password: ' DC_AUTH_PW && export DC_AUTH_PW
+docker run --rm --gpus all \
+    -e DC_HOST=http://<server>:<port> -e DC_MATCH_ID=<match-id> -e DC_TEAM=<0 or 1> \
+    -e DC_AUTH_ID=<id> -e DC_AUTH_PW \
+    cnn-client
+```
+
+`-e DC_AUTH_PW` without a value passes the variable from your shell.
 
 #### TLS server with a private CA
 The image trusts the public certificate authorities. For a server whose certificate is signed by a private CA,
 mount the CA's public certificate and point `SSL_CERT_FILE` at it:
 
 ```bash
-docker run --rm --gpus all -e DC_AUTH_PW \
+docker run --rm --gpus all \
     -v /path/to/ca.crt:/etc/dc4/ca.crt:ro -e SSL_CERT_FILE=/etc/dc4/ca.crt \
-    cnn-client --host https://<server> --id <match-id> --team 0 --auth-id <id>
+    cnn-client --host https://<server> --id <match-id> --team <0 or 1> \
+    --auth-id <id> --auth-pw '<password>'
 ```
-
-#### Another model without rebuilding
-Mount a directory holding `traced.pt` and `win_table.csv` over the built-in one (symbolic links inside it are fine):
-
-```bash
-docker run --rm --gpus all -e DC_AUTH_PW -v /path/to/model-dir:/app/src/engine/model:ro cnn-client ...
-```
-
-At start-up the client logs the model and win table it loaded, with their SHA-256.
 
 #### Troubleshooting
 | Message | Cause and fix |
 |---|---|
 | `[Error] Failed to create HTTP client for host: ...` | The client got no HTTP response from the server: wrong host or port, a host name the container can't resolve (add `--add-host <name>:<IP>`), or a TLS certificate it doesn't trust (see [TLS server with a private CA](#tls-server-with-a-private-ca)). Check the server from the host with `curl https://<server>/`. |
-| `...: command not found` after the client's output | The shell split the command line, typically at a special character in an unquoted password. Pass the password with `-e DC_AUTH_PW` or in single quotes. |
 | `CUDA is not available.` | The container sees no GPU: check `--gpus all`, the NVIDIA Container Toolkit, and the driver's CUDA version. |
 | `[Error] Host and ID must be specified.` | `--host` and `--id` (or `DC_HOST` and `DC_MATCH_ID`) are required. |
 
