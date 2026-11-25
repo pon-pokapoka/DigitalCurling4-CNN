@@ -14,8 +14,8 @@ and value. Build and run instructions are in README.md.
   or `-c commit.gpgsign=false`.
 - **Public repo.** Commit nothing specific to one deployment: hostnames,
   registry addresses, cluster namespaces or sizes (GPU slot counts),
-  home paths. Those go in uncommitted files (`.devcontainer/local.env`,
-  `scripts/.self_play*.env`).
+  home paths. Those go in the uncommitted `.devcontainer/local.env` or
+  the environment.
 - **English only**, including README sections and comments, even where
   the existing text is Japanese. Leave existing Japanese text alone
   unless asked.
@@ -23,14 +23,13 @@ and value. Build and run instructions are in README.md.
   images or training data (`model/` is gitignored). A release is the
   source plus the model files only, with no binary or image: those would
   redistribute third-party code and need a notices file first.
-- **No raw passwords on disk**, not even in a gitignored `.env` or
-  `scripts/.self_play*.env`: those hold settings only. Logins live in
-  the cluster; pass them in memory for one run.
+- **No raw passwords on disk**, not even in a gitignored file such as
+  `.devcontainer/local.env`: it holds settings only. Logins live in the
+  cluster; pass them in memory for one run.
 - **The dev container works for anyone.** By default it needs no SSH
   key, GitHub login or Claude; personal options go through the
   uncommitted `.devcontainer/local.env` (see `local.env.example`).
-  Dev-environment helpers go in `.devcontainer/`; `scripts/` holds
-  self-play tooling only.
+  Dev-environment helpers go in `.devcontainer/`.
 - **Memory before builds.** Builds compete with self-play for the same
   machine's memory. Check `free -h` before `cmake --build`, tests or
   `docker build`; if memory is short, say so rather than start a build
