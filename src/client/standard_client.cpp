@@ -16,8 +16,14 @@ std::unique_ptr<StandardClient> StandardClient::Create(
     }
 
     nlohmann::json j;
-    j["type"] = "fcv1light";
+    // Search simulator: stones that can't touch another follow a table of fcv1's
+    // own motion; fcv1's 1 ms Box2D frames run only where a contact can't be ruled
+    // out. The table is for 0.001 s frames.
+    // A Step() ends early when a stone leaves the sheet, so the engine removes
+    // it in the same frame as fcv1 would.
+    j["type"] = "fcv1table";
     j["seconds_per_frame"] = 0.001;
+    j["sheet_width"] = match_info.setting.sheet_width;
 
     auto idxs = engine->OnInit(
         match_info.rule,
