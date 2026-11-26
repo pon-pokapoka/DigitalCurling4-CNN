@@ -43,8 +43,9 @@ if (DIGITALCURLING_CLIENT_BUILD_TESTS)
 endif()
 
 # --- Build external libraries ---
-# renovate: datasource=github-tags depName=pon-pokapoka/DigitalCurling extractVersion=^v(?<version>.+)$
-set(DIGITALCURLING_CLIENT_DCLIB_VERSION "4.0.2")
+# The fork's releases are tagged yoshi-v<version> (4.1.0 has no plain v tag).
+# renovate: datasource=github-tags depName=pon-pokapoka/DigitalCurling extractVersion=^yoshi-v(?<version>.+)$
+set(DIGITALCURLING_CLIENT_DCLIB_VERSION "4.1.0")
 # renovate: datasource=github-tags depName=CLIUtils/CLI11 extractVersion=^v(?<version>.+)$
 set(DIGITALCURLING_CLIENT_CLILIB_VERSION "2.6.1")
 # renovate: datasource=github-tags depName=yhirose/cpp-httplib extractVersion=^v(?<version>.+)$
@@ -55,7 +56,7 @@ include(FetchContent)
 FetchContent_Declare(
     digitalcurling
     GIT_REPOSITORY https://github.com/pon-pokapoka/DigitalCurling.git
-    GIT_TAG        v${DIGITALCURLING_CLIENT_DCLIB_VERSION}
+    GIT_TAG        yoshi-v${DIGITALCURLING_CLIENT_DCLIB_VERSION}
 )
 set(DIGITALCURLING_BUILD_CORE ON)
 set(DIGITALCURLING_BUILD_PLAYERS ${DIGITALCURLING_CLIENT_USE_LOADER})
