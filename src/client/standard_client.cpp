@@ -16,8 +16,14 @@ std::unique_ptr<StandardClient> StandardClient::Create(
     }
 
     nlohmann::json j;
-    j["type"] = "fcv1light";
+    // Search simulator: each Step() goes to the next event (a contact, a stop, a
+    // sheet line) along a curve of fcv1's own motion; contacts are solved with
+    // Box2D's equations for equal circles.
+    // A Step() ends early when a stone leaves the sheet, so the engine removes
+    // it in the same frame as fcv1 would.
+    j["type"] = "fcv1event";
     j["seconds_per_frame"] = 0.001;
+    j["sheet_width"] = match_info.setting.sheet_width;
 
     auto idxs = engine->OnInit(
         match_info.rule,
