@@ -179,10 +179,10 @@ signing key, set `DC4_SSH_AGENT=1` and `DC4_GIT_CONFIG=1` and run
 `.devcontainer/setup-signing.sh` once inside the container.
 
 #### Runtime image
-The root [`Dockerfile`](Dockerfile) builds the client into a small image: `nvidia/cuda:*-base`, the libtorch
-shared libraries, the client binary and the model. It runs as a non-root user (UID 10001) and works with a
-read-only root filesystem. `ENTRYPOINT` is the client itself and there is no default command. How to build and
-run it is in [Running the client](#running-the-client).
+The root [`Dockerfile`](Dockerfile) builds the client into an image of NVIDIA's `nvidia/cuda:*-cudnn-runtime`
+(CUDA libraries, NCCL, cuDNN), libtorch's own shared libraries, the client binary and the model. It runs as a
+non-root user (UID 10001) and works with a read-only root filesystem. `ENTRYPOINT` is the client itself and
+there is no default command. How to build and run it is in [Running the client](#running-the-client).
 
 The model files may be symbolic links, e.g. `traced.pt -> gen0-588f425c.pt` (see [Versions](#versions) for the
 naming); the build copies their targets. From a git checkout, pass the build ID so the image identifies its code:
@@ -191,12 +191,29 @@ naming); the build copies their targets. From a git checkout, pass the build ID 
 docker build --build-arg BUILD_ID="$(git describe --tags --dirty --always)" -t cnn-client:latest .
 ```
 
-**Security updates.** The base images are pinned by digest and updated by Renovate, but NVIDIA doesn't rebuild
-them for Ubuntu fixes, so every stage runs `apt-get upgrade`. Docker caches that step; to pick up Ubuntu fixes
-released since the last build, rebuild the runtime stage without the cache (the build stage isn't shipped):
+**Many builds, shared layers.** Everything but the client binary and the model is the same for every commit: the
+`runtime-base` stage (the CUDA image, libtorch's libraries, Ubuntu updates, the user), about 3.3 GB compressed.
+Build it once, push it, and build clients on it by digest; each client commit then adds a few MB, and a model
+image made from it (a different `traced.pt` on top) a few MB more:
 
 ```bash
-docker build --no-cache-filter runtime --build-arg BUILD_ID="$(git describe --tags --dirty --always)" -t cnn-client:latest .
+docker build --target runtime-base -t registry.example/cnn-runtime:torch2.15.0-cu134-2026-11 .
+docker push registry.example/cnn-runtime:torch2.15.0-cu134-2026-11   # prints the digest
+docker build --build-arg RUNTIME_BASE=registry.example/cnn-runtime@sha256:<digest> \
+    --build-arg BUILD_ID="$(git describe --tags --dirty --always)" -t cnn-client:latest .
+```
+
+Without `RUNTIME_BASE` the build makes `runtime-base` itself; the image is the same, but its layers are shared
+with other builds only while Docker's cache holds them.
+
+**Security updates.** The base images are pinned by digest and updated by Renovate, but NVIDIA doesn't rebuild
+them for Ubuntu fixes, so every stage runs `apt-get upgrade` (in `runtime-base` with NVIDIA's apt repository set
+aside, so CUDA, cuDNN and NCCL stay at the pinned image's versions). Docker caches that step; to pick up Ubuntu
+fixes released since the last build, rebuild `runtime-base` without the cache, push it, and rebuild the clients on
+it (a few MB each; the build stage isn't shipped):
+
+```bash
+docker build --no-cache-filter runtime-base --target runtime-base -t registry.example/cnn-runtime:torch2.15.0-cu134-2026-12 .
 ```
 
 For the dev container, `.devcontainer/dev.sh rebuild` does the same.

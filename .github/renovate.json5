@@ -60,12 +60,12 @@
       dependencyDashboardApproval: true,
     },
     {
-      description: "Move the devel and base CUDA images together: the runtime stage copies cuDNN/NVRTC from the devel image",
+      description: "Move the devel and runtime CUDA images together: the client is compiled against one and runs on the other's CUDA, cuDNN and NCCL",
       matchDatasources: ["docker"],
       matchDepNames: ["nvidia/cuda"],
       groupName: "CUDA images",
       prBodyNotes: [
-        "Keep every `nvidia/cuda` image on the same CUDA version. libtorch (`TORCH_CUDA`) bundles its own CUDA libraries; check that the cluster's GPU driver supports the new CUDA version before deploying. A digest-only update means NVIDIA rebuilt the same tag.",
+        "Keep every `nvidia/cuda` image on the same CUDA and cuDNN version. The runtime image supplies CUDA, cuDNN and NCCL to libtorch, so its CUDA major version must match `TORCH_CUDA`; check that the cluster's GPU driver supports the new CUDA version before deploying. A digest-only update means NVIDIA rebuilt the same tag. After merging, rebuild and push `runtime-base` and build clients on the new digest.",
       ],
     },
     {
