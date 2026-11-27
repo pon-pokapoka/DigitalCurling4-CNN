@@ -43,9 +43,9 @@ if (DIGITALCURLING_CLIENT_BUILD_TESTS)
 endif()
 
 # --- Build external libraries ---
-# The fork's releases are tagged yoshi-v<version> (4.1.0 has no plain v tag).
+# The fork's releases are tagged yoshi-v<version> (4.1.x have no plain v tag).
 # renovate: datasource=github-tags depName=pon-pokapoka/DigitalCurling extractVersion=^yoshi-v(?<version>.+)$
-set(DIGITALCURLING_CLIENT_DCLIB_VERSION "4.1.0")
+set(DIGITALCURLING_CLIENT_DCLIB_VERSION "4.1.1")
 # renovate: datasource=github-tags depName=CLIUtils/CLI11 extractVersion=^v(?<version>.+)$
 set(DIGITALCURLING_CLIENT_CLILIB_VERSION "2.6.1")
 # renovate: datasource=github-tags depName=yhirose/cpp-httplib extractVersion=^v(?<version>.+)$
