@@ -12,6 +12,7 @@
 #include "digitalcurling/digitalcurling.hpp"
 #include "apply_move.hpp"
 #include "utility.hpp"
+#include "worker_thread.hpp"
 
 namespace dc = digitalcurling;
 
@@ -76,6 +77,10 @@ class Skip
         std::vector<int> legal_actions_; // the same shots as indices, for the search loop
 
         int kShotPerEnd_;
+
+        // Evaluates the search's batches. Declared last, so it is joined before
+        // the model and the other members it uses are destroyed.
+        WorkerThread eval_worker_;
 
 // torch::jit::script::Module module; // モデル
 

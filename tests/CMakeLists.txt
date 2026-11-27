@@ -36,6 +36,9 @@ digitalcurling_client_add_test(test_uctnode ${DIGITALCURLING_CLIENT_ENGINE_LIB})
 digitalcurling_client_add_test(test_search_policy ${DIGITALCURLING_CLIENT_ENGINE_LIB})
 digitalcurling_client_add_test(test_client_helpers ${DIGITALCURLING_CLIENT_ENGINE_LIB})
 
+digitalcurling_client_add_test(test_worker_thread)
+target_include_directories(test_worker_thread PRIVATE ${PROJECT_SOURCE_DIR}/src)
+
 digitalcurling_client_add_test(test_model_identity ${DIGITALCURLING_CLIENT_ENGINE_LIB})
 target_include_directories(test_model_identity PRIVATE ${PROJECT_SOURCE_DIR}/src)
 
