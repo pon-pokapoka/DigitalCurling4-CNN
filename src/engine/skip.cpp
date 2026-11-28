@@ -724,6 +724,12 @@ dc::moves::Move Skip::command(dc::GameState const& game_state)
     };
     std::vector<PendingChild> pending;
     std::future<std::pair<torch::Tensor, std::vector<float>>> pending_result;
+    // If the search throws, don't return while the worker still evaluates this
+    // shot's batch (a std::async future used to wait in its destructor).
+    struct WaitPending {
+        std::future<std::pair<torch::Tensor, std::vector<float>>>& result;
+        ~WaitPending() { if (result.valid()) result.wait(); }
+    } wait_pending{pending_result};
 
     auto finish_pending = [&]() {
         if (!pending_result.valid()) return;
@@ -840,7 +846,7 @@ dc::moves::Move Skip::command(dc::GameState const& game_state)
         }
 
         count += static_cast<int>(batch_states.size());
-        pending_result = std::async(std::launch::async, [this, states = std::move(batch_states)]() {
+        pending_result = eval_worker_.Submit([this, states = std::move(batch_states)]() {
             return EvaluateGameState(states, game_setting_);
         });
 
